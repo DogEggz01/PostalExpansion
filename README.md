@@ -13,6 +13,7 @@
 ### Hard port bonus ###
 - When deliver to certain harder to access port, the reward will be double again (so total x3 compare to regular mail mission)
 - You will start have chance to get hard port mission after reputaion 4. After rep 6 you will guaranteed to get 1.
+- Regular mail won't get this bonus.
 - Following port are considered hard port:
 | 26 | Aestra Abbey |
 | 32 | Mirage Mountain |
