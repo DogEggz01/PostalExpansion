@@ -1,4 +1,6 @@
 # PostalExpansion
+This is aim to make mail deliver excel in reputation grind. Or adjust gold reward and become full mailman
+
 ## Regular mail ##
 - All Main now goes into a seperated Mission book tab
 - Regular Mail gold reward default to 0.5x compare to vanilla, but reputation is now 1.5x. It can be adjust in Configurator.
