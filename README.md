@@ -49,3 +49,11 @@ This is aim to make mail deliver excel in reputation grind. Or adjust gold rewar
 | 31 | Old Ankh Town |
 | 6 | Oasis |
 | 21 | Chronos |
+### Urgent mail ###
+- Unlock after rep 6
+- one of the world express mail mission will become Urgent express mail
+- Urgent mail calculate due day with around 9 knots of speed.
+- Urgent mail add another x2 reward bonus, stackable with hard port and express mail bonus.
+- Urgent mail delay penalty:
+  - 1 day delay: no rep and 50% of gold
+  - 2 day delay: -200 rep and 5% of gold
