@@ -8,7 +8,7 @@ This is aim to make mail deliver excel in reputation grind. Or adjust gold rewar
 
 ## Express mail ##
 - After Reputation level 3, you will start receiving Express mail mission.
-- Express mail calculate delivery time limit with sailing speed around 7.2~7.3 knots. In game you will need to have 7 ~ 7.8 knots average speed to complete the deliver in time.
+- Express mail calculate delivery time limit with sailing speed around 7.2~7.3 knots. In game you will need to have 6.9 ~ 7.8 knots average speed to complete the deliver in time.
 - Express mail Mission have x1.5 reward (both gold and rep) compare to a Regular mail 3 package mission.
 - If you delay, 1 day delay will result in -50% rep reward, 2 days delay will receive no rep reward, 3 days or more delay will result in -100 rep. Gold reward follow Vanilla rule.
 
