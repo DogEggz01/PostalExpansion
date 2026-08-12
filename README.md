@@ -27,7 +27,7 @@ This is aim to make mail deliver excel in reputation grind. Or adjust gold rewar
 | 24 | On'na |
 | 25 | Sen'na |
 | 21 | Chronos |
-- Aim is to let small boat have advantages in doing hard port.
+  - Aim is to let small boat have advantages in doing hard port.
 
 ### Spawn rule ###
 - At rep 3 you will receive 1 local and 1 world express mail mission. Rep 4 you will receive 2 each. Rep 5 three each. Rep 6+ still 3 each but you will have 1 guaranteed hard port mission for both local and world mission (so total 2).
