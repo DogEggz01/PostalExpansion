@@ -12,7 +12,6 @@ This is aim to make mail deliver excel in reputation grind. Or adjust gold rewar
   - Speed is picked so small boat could finish it in time, if you rigged for it.
 - Express mail Mission have x1.5 reward (both gold and rep) compare to a Regular mail 3 package mission.
 - If you delay, 1 day delay will result in -50% rep reward, 2 days delay will receive no rep reward, 3 days or more delay will result in -100 rep. Gold reward follow Vanilla rule.
-
 ### Hard port bonus ###
 - When deliver to certain harder to access port, the reward will be double again (so total x3 compare to regular mail mission)
 - You will start having chance to get hard port mission after reputaion 4. After rep 6 you will guaranteed to get 1.
@@ -28,7 +27,6 @@ This is aim to make mail deliver excel in reputation grind. Or adjust gold rewar
 | 25 | Sen'na |
 | 21 | Chronos |
   - Aim is to let small boat have advantages in doing hard port.
-
 ### Spawn rule ###
 - At rep 3 you will receive 1 local and 1 world express mail mission. Rep 4 you will receive 2 each. Rep 5 three each. Rep 6+ still 3 each but you will have 1 guaranteed hard port mission for both local and world mission (so total 2).
 - Express Mail ignore all destination limit, means anywhere could be the destination, except Safforn.
