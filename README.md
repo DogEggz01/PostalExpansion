@@ -71,6 +71,7 @@ This is aim to make mail deliver excel in reputation grind. Or adjust gold rewar
 - Due Day rep penalty. Gold will always be paid.
   - 1 day: 0 rep
   - 2+ days: -5000
+- Currently total 34 missions.
 ### Anonymous letter
 - Unlock after rep 8
 - Deliver to more remote or uninhabited area.
@@ -84,3 +85,4 @@ This is aim to make mail deliver excel in reputation grind. Or adjust gold rewar
 - Due day gold penalty
   - 1 day: 1 gold
   - 2 day: 0 gold
+- Currently total 9 mission.
