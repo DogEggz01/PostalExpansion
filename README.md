@@ -86,3 +86,13 @@ This is aim to make mail deliver excel in reputation grind. Or adjust gold rewar
   - 1 day: 1 gold
   - 2 day: 0 gold
 - Currently total 9 mission.
+## Golden Delivery
+- Unlock after rep 9
+- Only spawn one mission in each port. Spawn chance 50%. Refresh every day.
+- Can origin in any port aside from Saffron. Could be deliver to any port.
+  - Can only spawn mission with delivery range more than 288 miles.
+- Reward: 10x money reward compare to regular mail. 15x reputation reward compare to regular mail.
+- You need average 11.5 knots speed to complete this.
+- Due day penalty 
+  - 1 day - 0 money and 0 reputation.
+  - 2+day - 0 money and - 50000 reputation.
