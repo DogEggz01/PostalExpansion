@@ -22,6 +22,30 @@ namespace PostalExpansion
 				return true;
 			}
 
+			if (GoldenDeliveryMissions.IsGolden(__instance))
+			{
+				int goldenDaysLate =
+					Mathf.Max(0, GameState.day - __instance.dueDay);
+				if (goldenDaysLate >= 2)
+				{
+					__result = GoldenDeliveryMissions.SeverelyLatePenalty;
+				}
+				else if (goldenDaysLate == 1)
+				{
+					__result = 0;
+				}
+				else
+				{
+					__result = Mathf.RoundToInt(
+						__instance.distance /
+							Mathf.Max(1, __instance.goodCount) *
+							Plugin.RegularMailReputationMultiplier.Value *
+							GoldenDeliveryMissions.ReputationMultiplier);
+				}
+
+				return false;
+			}
+
 			if (PostalMail.IsRegisteredLetter(saveable))
 			{
 				int letterDaysLate =

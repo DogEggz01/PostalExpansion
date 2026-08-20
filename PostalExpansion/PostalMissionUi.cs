@@ -15,7 +15,9 @@ namespace PostalExpansion
 
 		private static readonly Color UrgentMissionColor =
 			new Color(1f, 0.45f, 0.08f, 1f);
-		private static readonly MaterialPropertyBlock UrgentMissionProperties =
+		private static readonly Color GoldenMissionColor =
+			new Color(1f, 0.72f, 0.12f, 1f);
+		private static readonly MaterialPropertyBlock MissionHighlightProperties =
 			new MaterialPropertyBlock();
 
 		private static readonly FieldInfo LocalButtonField =
@@ -231,7 +233,7 @@ namespace PostalExpansion
 			return true;
 		}
 
-		internal static void UpdateUrgentMissionHighlights(MissionListUI ui)
+		internal static void UpdateMissionHighlights(MissionListUI ui)
 		{
 			if (ui == null || MissionButtonsField == null)
 			{
@@ -258,13 +260,28 @@ namespace PostalExpansion
 					continue;
 				}
 
-				bool urgent = button.gameObject.activeSelf &&
+				bool active = button.gameObject.activeSelf;
+				bool golden = active &&
+					GoldenDeliveryMissions.IsGolden(button.mission);
+				bool urgent = active &&
 					UrgentExpressMail.IsUrgent(button.mission);
-				UrgentMissionProperties.Clear();
-				renderer.GetPropertyBlock(UrgentMissionProperties);
-				SetUrgentMaterialColor(material, "_Color", urgent);
-				SetUrgentMaterialColor(material, "_BaseColor", urgent);
-				renderer.SetPropertyBlock(UrgentMissionProperties);
+				bool highlighted = golden || urgent;
+				Color highlightColor = golden
+					? GoldenMissionColor
+					: UrgentMissionColor;
+				MissionHighlightProperties.Clear();
+				renderer.GetPropertyBlock(MissionHighlightProperties);
+				SetMissionMaterialColor(
+					material,
+					"_Color",
+					highlighted,
+					highlightColor);
+				SetMissionMaterialColor(
+					material,
+					"_BaseColor",
+					highlighted,
+					highlightColor);
+				renderer.SetPropertyBlock(MissionHighlightProperties);
 			}
 		}
 
@@ -320,6 +337,7 @@ namespace PostalExpansion
 				AddFilteredVanillaMissions(port, false, tab, missions);
 				AddFilteredVanillaMissions(port, true, tab, missions);
 				PostalExpressMail.AddExpressMissions(port, missions);
+				GoldenDeliveryMissions.AddMission(port, missions);
 				RegisteredLetterMissions.AddMissions(port, missions);
 				AnonymousLetterMissions.AddMissions(port, missions);
 			}
@@ -491,10 +509,11 @@ namespace PostalExpansion
 			tabRoot.localScale = localScale;
 		}
 
-		private static void SetUrgentMaterialColor(
+		private static void SetMissionMaterialColor(
 			Material material,
 			string propertyName,
-			bool urgent)
+			bool highlighted,
+			Color highlightColor)
 		{
 			if (!material.HasProperty(propertyName))
 			{
@@ -502,13 +521,13 @@ namespace PostalExpansion
 			}
 
 			Color color = material.GetColor(propertyName);
-			if (urgent)
+			if (highlighted)
 			{
-				color.r = UrgentMissionColor.r;
-				color.g = UrgentMissionColor.g;
-				color.b = UrgentMissionColor.b;
+				color.r = highlightColor.r;
+				color.g = highlightColor.g;
+				color.b = highlightColor.b;
 			}
-			UrgentMissionProperties.SetColor(propertyName, color);
+			MissionHighlightProperties.SetColor(propertyName, color);
 		}
 
 		private static bool HasMissionListPagingReflection()

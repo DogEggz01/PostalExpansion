@@ -1,6 +1,4 @@
 using System;
-using System.Collections.Generic;
-using System.Runtime.CompilerServices;
 using UnityEngine;
 
 namespace PostalExpansion
@@ -15,24 +13,22 @@ namespace PostalExpansion
 		private const string ActiveMissionDataKey = "PostalExpansion.UrgentExpressMail.Active.v1";
 		private const string ClaimedOfferDataKey = "PostalExpansion.UrgentExpressMail.Claimed.v1";
 
-		private static ConditionalWeakTable<Mission, Marker> urgentMissions =
-			new ConditionalWeakTable<Mission, Marker>();
-		private static readonly HashSet<string> claimedOffers = new HashSet<string>();
+		private static readonly DailySpecialMissionState State =
+			new DailySpecialMissionState(
+				ActiveMissionDataKey,
+				ClaimedOfferDataKey,
+				SerializeActiveMission,
+				MatchesSavedMission,
+				ApplyMissionName);
 
 		internal static bool IsUrgent(Mission mission)
 		{
-			return mission != null && urgentMissions.TryGetValue(mission, out _);
+			return State.IsMarked(mission);
 		}
 
 		internal static bool CanOfferAt(Port origin)
 		{
-			if (origin == null)
-			{
-				return false;
-			}
-
-			PruneClaimsForCurrentDay();
-			return !claimedOffers.Contains(GetClaimKey(GameState.day, origin.portIndex));
+			return State.CanOfferAt(origin);
 		}
 
 		internal static void MarkGenerated(Mission mission)
@@ -60,120 +56,32 @@ namespace PostalExpansion
 
 		internal static void MissionAccepted(Mission mission)
 		{
-			if (!IsUrgent(mission) ||
-				mission.originPort == null ||
-				mission.missionIndex < 0 ||
-				PlayerMissions.missions == null ||
-				mission.missionIndex >= PlayerMissions.missions.Length ||
-				PlayerMissions.missions[mission.missionIndex] != mission)
-			{
-				return;
-			}
-
-			PruneClaimsForCurrentDay();
-			claimedOffers.Add(GetClaimKey(GameState.day, mission.originPort.portIndex));
+			State.MissionAccepted(mission);
 		}
 
 		internal static void SavePersistentState()
 		{
-			if (GameState.modData == null)
-			{
-				GameState.modData = new Dictionary<string, string>();
-			}
-
-			var activeEntries = new List<string>();
-			if (PlayerMissions.missions != null)
-			{
-				for (int i = 0; i < PlayerMissions.missions.Length; i++)
-				{
-					Mission mission = PlayerMissions.missions[i];
-					if (!IsUrgent(mission) ||
-						mission.originPort == null ||
-						mission.destinationPort == null)
-					{
-						continue;
-					}
-
-					activeEntries.Add(string.Join(",",
-						i,
-						mission.originPort.portIndex,
-						mission.destinationPort.portIndex));
-				}
-			}
-
-			GameState.modData[ActiveMissionDataKey] = string.Join(";", activeEntries);
-
-			PruneClaimsForCurrentDay();
-			var claims = new List<string>(claimedOffers);
-			claims.Sort(StringComparer.Ordinal);
-			GameState.modData[ClaimedOfferDataKey] = string.Join(";", claims);
+			State.SavePersistentState();
 		}
 
 		internal static void LoadPersistentState()
 		{
-			ResetRuntimeState();
-			if (GameState.modData == null)
-			{
-				return;
-			}
-
-			if (GameState.modData.TryGetValue(ClaimedOfferDataKey, out string claimData))
-			{
-				string currentDayPrefix = GameState.day + ",";
-				foreach (string claim in claimData.Split(
-					new[] { ';' },
-					StringSplitOptions.RemoveEmptyEntries))
-				{
-					if (claim.StartsWith(currentDayPrefix, StringComparison.Ordinal))
-					{
-						claimedOffers.Add(claim);
-					}
-				}
-			}
-
-			if (PlayerMissions.missions == null ||
-				!GameState.modData.TryGetValue(ActiveMissionDataKey, out string missionData))
-			{
-				return;
-			}
-
-			foreach (string entry in missionData.Split(
-				new[] { ';' },
-				StringSplitOptions.RemoveEmptyEntries))
-			{
-				string[] fields = entry.Split(',');
-				if (fields.Length != 3 ||
-					!int.TryParse(fields[0], out int slot) ||
-					!int.TryParse(fields[1], out int originIndex) ||
-					!int.TryParse(fields[2], out int destinationIndex) ||
-					slot < 0 ||
-					slot >= PlayerMissions.missions.Length)
-				{
-					continue;
-				}
-
-				Mission mission = PlayerMissions.missions[slot];
-				if (IsExpressMission(mission) &&
-					mission.originPort != null &&
-					mission.destinationPort != null &&
-					mission.missionIndex == slot &&
-					mission.originPort.portIndex == originIndex &&
-					mission.destinationPort.portIndex == destinationIndex)
-				{
-					MarkRuntime(mission);
-				}
-			}
+			State.LoadPersistentState();
 		}
 
 		internal static void ResetRuntimeState()
 		{
-			urgentMissions = new ConditionalWeakTable<Mission, Marker>();
-			claimedOffers.Clear();
+			State.ResetRuntimeState();
 		}
 
 		private static void MarkRuntime(Mission mission)
 		{
-			urgentMissions.GetValue(mission, _ => new Marker());
+			State.Mark(mission);
+			ApplyMissionName(mission);
+		}
+
+		private static void ApplyMissionName(Mission mission)
+		{
 			if (string.IsNullOrEmpty(mission.missionName))
 			{
 				mission.missionName = NamePrefix.TrimEnd();
@@ -195,20 +103,24 @@ namespace PostalExpansion
 			return PostalMail.IsExpressMail(saveable);
 		}
 
-		private static string GetClaimKey(int day, int originPortIndex)
+		private static string SerializeActiveMission(int slot, Mission mission)
 		{
-			return day + "," + originPortIndex;
+			return string.Join(",",
+				slot,
+				mission.originPort.portIndex,
+				mission.destinationPort.portIndex);
 		}
 
-		private static void PruneClaimsForCurrentDay()
+		private static bool MatchesSavedMission(
+			Mission mission,
+			string[] fields)
 		{
-			string currentDayPrefix = GameState.day + ",";
-			claimedOffers.RemoveWhere(
-				claim => !claim.StartsWith(currentDayPrefix, StringComparison.Ordinal));
-		}
-
-		private sealed class Marker
-		{
+			return fields.Length == 3 &&
+				int.TryParse(fields[1], out int originIndex) &&
+				int.TryParse(fields[2], out int destinationIndex) &&
+				IsExpressMission(mission) &&
+				mission.originPort.portIndex == originIndex &&
+				mission.destinationPort.portIndex == destinationIndex;
 		}
 	}
 }

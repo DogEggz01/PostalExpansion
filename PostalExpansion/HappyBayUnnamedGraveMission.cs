@@ -16,7 +16,7 @@ namespace PostalExpansion
 				new Vector3(0f, 355.344f, 0f),
 				new Vector3(2.5f, 2.5f, 2.5f),
 				8844.2f,
-				new LetterDeliveryWindow(5f, 6f, "05-06"),
+				new LetterDeliveryWindow(5f, 7f, "05-07"),
 				new[]
 				{
 					SailwindPortIndex.Neverdin

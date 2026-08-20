@@ -8,6 +8,7 @@ namespace PostalExpansion
 		private static void Postfix(Mission mission)
 		{
 			UrgentExpressMail.MissionAccepted(mission);
+			GoldenDeliveryMissions.MissionAccepted(mission);
 			RegisteredLetterMissions.MissionAccepted(mission);
 			AnonymousLetterMissions.MissionAccepted(mission);
 		}
@@ -19,8 +20,10 @@ namespace PostalExpansion
 		private static void Prefix()
 		{
 			UrgentExpressMail.SavePersistentState();
+			GoldenDeliveryMissions.SavePersistentState();
 			RegisteredLetterMissions.SavePersistentState();
 			AnonymousLetterMissions.SavePersistentState();
+			SpecialMailHistory.SavePersistentState();
 		}
 	}
 
@@ -30,8 +33,10 @@ namespace PostalExpansion
 		private static void Postfix()
 		{
 			UrgentExpressMail.LoadPersistentState();
+			GoldenDeliveryMissions.LoadPersistentState();
 			RegisteredLetterMissions.LoadPersistentState();
 			AnonymousLetterMissions.LoadPersistentState();
+			SpecialMailHistory.LoadPersistentState();
 			LetterMissionDebug.Reset();
 		}
 	}
@@ -42,8 +47,10 @@ namespace PostalExpansion
 		private static void Prefix()
 		{
 			UrgentExpressMail.ResetRuntimeState();
+			GoldenDeliveryMissions.ResetRuntimeState();
 			RegisteredLetterMissions.ResetRuntimeState();
 			AnonymousLetterMissions.ResetRuntimeState();
+			SpecialMailHistory.ResetRuntimeState();
 			LetterMissionDebug.Reset();
 		}
 	}

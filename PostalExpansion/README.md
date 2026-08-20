@@ -1,4 +1,4 @@
-# Postal Expansion 1.0.0
+# Postal Expansion 1.1.1
 
 Postal Expansion is a BepInEx mod for Sailwind that adds a dedicated Mail tab to the port mission book and expands vanilla mail deliveries.
 
@@ -6,11 +6,16 @@ Postal Expansion is a BepInEx mod for Sailwind that adds a dedicated Mail tab to
 
 - Adds a third `mail` tab beside the vanilla `local` and `world` tabs.
 - Keeps mail missions out of the Local and World lists.
-- Shows regular mail, Registered Letter, Anonymous Letter, and Express Mail missions together in the Mail list.
+- Shows regular mail, Registered Letter, Anonymous Letter, Express Mail, and Golden Delivery missions together in the Mail list.
 - Reuses the vanilla mission details, map, acceptance, cargo spawning, and mission completion systems.
 - Adds Express Mail as good `69` / prefab `239`, with reputation-gated deterministic Local and World offers.
 - Adds one Urgent Express offer from World Express missions per eligible origin/day at reputation level 6 or above.
+- Adds one deterministic Golden Delivery offer per eligible origin/day at reputation level 9, with a 50% daily spawn chance and destinations farther than 288 mission-distance units.
+- Golden Delivery uses the Express Mail prefab, spawns one item, pays ten times the comparable regular-mail reward, and awards fifteen times regular-mail reputation when on time.
+- Golden Delivery pays no money or reputation one day late and applies `-50000` reputation two or more days late.
+- Golden Delivery deadlines use base speed `4.0f`, equivalent to `21 km/h` (`11.34 knots`) with the Express Mail prefab's speed tier.
 - Persists accepted Urgent status and offer claims through `GameState.modData`.
+- Persists Golden Delivery status, daily claims, and distinct Golden, Urgent, and Anonymous mission-history names through `GameState.modData`.
 - Defines each Registered and Anonymous Letter mission in its own class while sharing generation, persistence, UI, and delivery infrastructure.
 - Includes 34 independently generated Registered Letter missions across Gold Rock City, Neverdin, Albacore Town, Alchemist's Island, Al'Ankh Academy, Dragon Cliffs, Sanctuary, Crab Beach, Sage Hills, Fort Aestrin, Sunspire, Happy Bay, Oasis, Siren Song, Serpent Isle, Mount Malefic, Chronos, Fire Fish Town, Sen'na, On'na, Firefly Grotto, Aestra Abbey, Fey Valley, Turtle Island, Old Ankh Town, Mirage Mountain, and Kicia Bay.
 - Includes nine independently generated Anonymous Letter missions at Oasis, Happy Bay, Eastwind, Saffron Island, Al'Nilem, Old Ankh Town, Aestra Abbey, Turtle Island, and Dead Cove.

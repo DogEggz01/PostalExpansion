@@ -6,11 +6,12 @@ namespace PostalExpansion
 	internal sealed class LetterDeliveryDialogue
 	{
 		private const string BubbleGraphicsName = "gfx";
+		private const string BubbleReferenceText =
+			"Share a drink with a fellow sailor?";
 		private const int DialogueWrapCharacterLimit = 40;
 		private const float ObserverOffset = 0.75f;
 		private const float HeadHeightOffset = 0.5f;
-		private const float BubblePaddingMultiplier = 1.15f;
-		private const float MinimumBubbleWidthMultiplier = 0.8f;
+		private const float MinimumBubbleWidthMultiplier = 0.35f;
 		private const float MaximumBubbleWidthMultiplier = 1.8f;
 
 		private static bool missingBubbleGraphicsWarningLogged;
@@ -22,7 +23,7 @@ namespace PostalExpansion
 		private TextMesh text;
 		private Transform bubbleGraphics;
 		private Vector3 baseBubbleScale;
-		private float baseBubbleWidth;
+		private float baseTextWidth;
 
 		internal LetterDeliveryDialogue(Transform dialogueAnchor, int destinationPortIndex)
 		{
@@ -129,10 +130,7 @@ namespace PostalExpansion
 				? bubbleRoot.Find(BubbleGraphicsName)
 				: null;
 
-			MeshFilter graphicsMesh = bubbleGraphics != null
-				? bubbleGraphics.GetComponent<MeshFilter>()
-				: null;
-			if (graphicsMesh == null || graphicsMesh.sharedMesh == null)
+			if (bubbleGraphics == null || text == null || text.font == null)
 			{
 				if (!missingBubbleGraphicsWarningLogged)
 				{
@@ -145,9 +143,7 @@ namespace PostalExpansion
 			}
 
 			baseBubbleScale = bubbleGraphics.localScale;
-			baseBubbleWidth =
-				graphicsMesh.sharedMesh.bounds.size.x *
-				Mathf.Abs(baseBubbleScale.x);
+			baseTextWidth = MeasureMaximumLineWidth(BubbleReferenceText);
 		}
 
 		private void ResizeBubble(string dialogueText)
@@ -155,20 +151,37 @@ namespace PostalExpansion
 			if (bubbleGraphics == null ||
 				text == null ||
 				text.font == null ||
-				baseBubbleWidth <= 0f)
+				baseTextWidth <= 0f)
 			{
 				return;
 			}
 
 			bubbleGraphics.localScale = baseBubbleScale;
+			float renderedTextWidth = MeasureMaximumLineWidth(dialogueText);
+			if (renderedTextWidth <= 0f)
+			{
+				return;
+			}
+
+			float widthMultiplier = Mathf.Clamp(
+				renderedTextWidth / baseTextWidth,
+				MinimumBubbleWidthMultiplier,
+				MaximumBubbleWidthMultiplier);
+			Vector3 scale = baseBubbleScale;
+			scale.x *= widthMultiplier;
+			bubbleGraphics.localScale = scale;
+		}
+
+		private float MeasureMaximumLineWidth(string value)
+		{
 			text.font.RequestCharactersInTexture(
-				dialogueText,
+				value,
 				text.fontSize,
 				text.fontStyle);
 
 			float lineWidth = 0f;
 			float maximumLineWidth = 0f;
-			foreach (char character in dialogueText)
+			foreach (char character in value)
 			{
 				if (character == '\n')
 				{
@@ -185,26 +198,11 @@ namespace PostalExpansion
 						text.fontSize,
 						text.fontStyle))
 				{
-					lineWidth += info.advance * text.characterSize;
+					lineWidth += info.advance;
 				}
 			}
 
-			maximumLineWidth = Mathf.Max(
-				maximumLineWidth,
-				lineWidth) * Mathf.Abs(text.transform.localScale.x);
-			if (maximumLineWidth <= 0f)
-			{
-				return;
-			}
-
-			float widthMultiplier = Mathf.Clamp(
-				maximumLineWidth * BubblePaddingMultiplier /
-					baseBubbleWidth,
-				MinimumBubbleWidthMultiplier,
-				MaximumBubbleWidthMultiplier);
-			Vector3 scale = baseBubbleScale;
-			scale.x *= widthMultiplier;
-			bubbleGraphics.localScale = scale;
+			return Mathf.Max(maximumLineWidth, lineWidth);
 		}
 
 		private static string Wrap(string value, int size)

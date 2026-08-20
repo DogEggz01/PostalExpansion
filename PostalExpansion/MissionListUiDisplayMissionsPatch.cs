@@ -7,7 +7,7 @@ namespace PostalExpansion
 	{
 		private static void Postfix(MissionListUI __instance)
 		{
-			PostalMissionUi.UpdateUrgentMissionHighlights(__instance);
+			PostalMissionUi.UpdateMissionHighlights(__instance);
 		}
 	}
 }

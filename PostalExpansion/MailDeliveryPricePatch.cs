@@ -8,6 +8,17 @@ namespace PostalExpansion
 	{
 		private static bool Prefix(Mission __instance, ref int __result)
 		{
+			if (GoldenDeliveryMissions.IsGolden(__instance))
+			{
+				int goldenDaysLate = Mathf.Max(
+					0,
+					GameState.day - __instance.dueDay);
+				__result = goldenDaysLate == 0
+					? __instance.totalPrice / Mathf.Max(1, __instance.goodCount)
+					: 0;
+				return false;
+			}
+
 			if (AnonymousLetterMissions.TryGetDefinition(__instance, out _))
 			{
 				int anonymousDaysLate = Mathf.Max(
