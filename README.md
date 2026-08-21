@@ -1,5 +1,6 @@
 # PostalExpansion
 *Disclaimer: This mod is made with ChatGPT 5.6 Sol*
+
 This is aim to make mail deliver excel in reputation grind. Or adjust gold reward and become full mailman
 ## Regular mail ##
 - All Mail now goes into a seperated Mission book tab
