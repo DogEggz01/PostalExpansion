@@ -2,7 +2,8 @@
 This is aim to make mail deliver excel in reputation grind. Or adjust gold reward and become full mailman
 ## Regular mail ##
 - All Mail now goes into a seperated Mission book tab
-- Regular Mail gold reward default to 0.5x compare to vanilla, but reputation is now 1.5x. It can be adjust in Configurator.
+- Regular Mail gold reward default to 0.5x compare to vanilla, but reputation is now 1.25x.
+- Both gold reward and Rep reward can be adjust in Configurator.
 - Regular Mail package count change with Reputation level. 0&1 = 1 package, 2 = 2 package, 3+ = 3 package.
 ## Express mail ##
 - After Reputation level 3, you will start receiving Express mail mission.
