@@ -13,7 +13,7 @@ namespace PostalExpansion
 	{
 		internal const string PluginGuid = "com.DogEggz.postalexpansion";
 		internal const string PluginName = "Postal Expansion";
-		internal const string PluginVersion = "1.1.1";
+		internal const string PluginVersion = "1.1.2";
 
 		private const float DefaultRegularMailRewardMultiplier = 2f;
 		private const float DefaultRegularMailReputationMultiplier = 4.5f;

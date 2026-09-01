@@ -81,6 +81,7 @@ namespace PostalExpansion
 				Object.DontDestroyOnLoad(letterPrefab);
 			}
 
+			PostalMailOutlineSanitizer.Attach(letterPrefab);
 			ConfigurePrefab(letterPrefab, questLetterPrefab);
 			if (!PostalPrefabRegistration.RegisterShipItem(
 				directory,

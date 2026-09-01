@@ -120,6 +120,7 @@ namespace PostalExpansion
 				Object.DontDestroyOnLoad(expressMailPrefab);
 			}
 
+			PostalMailOutlineSanitizer.Attach(expressMailPrefab);
 			ConfigureExpressMailPrefab(expressMailPrefab);
 			EnsureExpressMailSeal(expressMailPrefab);
 			if (!PostalPrefabRegistration.RegisterShipItem(
