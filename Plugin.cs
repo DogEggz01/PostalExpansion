@@ -5,7 +5,6 @@ using System.Reflection;
 using System.Runtime.CompilerServices;
 using BepInEx;
 using BepInEx.Configuration;
-using cakeslice;
 using HarmonyLib;
 using UnityEngine;
 using UnityEngine.Rendering;
@@ -19,7 +18,7 @@ namespace PostalExpansion
 	{
 		internal const string PluginGuid = "com.DogEggz.postalexpansion";
 		internal const string PluginName = "Postal Expansion";
-		internal const string PluginVersion = "1.1.3";
+		internal const string PluginVersion = "1.1.4";
 
 		private const float DefaultRegularMailRewardMultiplier = 2f;
 		private const float DefaultRegularMailReputationMultiplier = 4.5f;
@@ -180,98 +179,43 @@ namespace PostalExpansion
 
 	internal static class PostalPrefabRegistration
 	{
-		internal static bool IsRegistered(PrefabsDirectory directory, int prefabIndex, GameObject prefab)
+		private static Transform templateHolder;
+
+		// Clones the donor under an inactive holder: the template never runs as an item, and the
+		// items made from it start active.
+		internal static GameObject CreateTemplate(GameObject donor, string name)
 		{
-			return directory != null &&
-				directory.directory != null &&
-				directory.shipItems != null &&
-				prefab != null &&
-				directory.directory.Length > prefabIndex &&
-				directory.shipItems.Length > prefabIndex &&
-				directory.directory[prefabIndex] == prefab &&
-				directory.shipItems[prefabIndex] == prefab.GetComponent<ShipItem>();
+			if (templateHolder == null)
+			{
+				var holder = new GameObject("postal_expansion_item_templates");
+				holder.SetActive(false);
+				Object.DontDestroyOnLoad(holder);
+				templateHolder = holder.transform;
+			}
+
+			GameObject template = Object.Instantiate(donor, templateHolder, false);
+			template.name = name;
+			return template;
 		}
 
-		internal static bool IsSlotOccupiedByAnotherPrefab(
-			PrefabsDirectory directory,
-			int prefabIndex,
-			GameObject expectedPrefab)
+		internal static GameObject GetRegularMail()
 		{
-			if (directory == null)
-			{
-				return false;
-			}
-
-			if (directory.directory != null &&
-				directory.directory.Length > prefabIndex &&
-				directory.directory[prefabIndex] != null &&
-				directory.directory[prefabIndex] != expectedPrefab)
-			{
-				return true;
-			}
-
-			ShipItem expectedShipItem = expectedPrefab != null
-				? expectedPrefab.GetComponent<ShipItem>()
+			GameObject[] directory = PrefabsDirectory.instance != null
+				? PrefabsDirectory.instance.directory
 				: null;
-			return directory.shipItems != null &&
-				directory.shipItems.Length > prefabIndex &&
-				directory.shipItems[prefabIndex] != null &&
-				directory.shipItems[prefabIndex] != expectedShipItem;
-		}
-
-		internal static bool EnsureCapacity(PrefabsDirectory directory, int prefabIndex)
-		{
-			if (directory == null || directory.directory == null)
-			{
-				return false;
-			}
-
-			int requiredSize = prefabIndex + 1;
-			if (directory.directory.Length < requiredSize)
-			{
-				Array.Resize(ref directory.directory, requiredSize);
-			}
-
-			if (directory.shipItems == null)
-			{
-				directory.shipItems = new ShipItem[directory.directory.Length];
-			}
-			else if (directory.shipItems.Length < requiredSize)
-			{
-				Array.Resize(ref directory.shipItems, requiredSize);
-			}
-
-			return true;
-		}
-
-		internal static bool RegisterShipItem(PrefabsDirectory directory, int prefabIndex, GameObject prefab)
-		{
-			if (directory == null ||
-				directory.shipItems == null ||
-				directory.shipItems.Length <= prefabIndex ||
-				prefab == null)
-			{
-				return false;
-			}
-
-			ShipItem shipItem = prefab.GetComponent<ShipItem>();
-			if (shipItem == null)
-			{
-				return false;
-			}
-
-			directory.shipItems[prefabIndex] = shipItem;
-			return true;
+			return directory != null && directory.Length > PostalMail.RegularMailItemIndex
+				? directory[PostalMail.RegularMailItemIndex]
+				: null;
 		}
 	}
 
 	[HarmonyPatch(typeof(PrefabsDirectory), "Start")]
 	internal static class PrefabsDirectoryStartPatch
 	{
-		private static void Postfix(PrefabsDirectory __instance)
+		private static void Postfix()
 		{
-			Letter.EnsureRegistered(__instance);
-			PostalExpressMail.EnsureRegistered(__instance);
+			Letter.EnsureTemplate();
+			PostalExpressMail.EnsureTemplate();
 		}
 	}
 
@@ -559,55 +503,37 @@ namespace PostalExpansion
 		}
 	}
 
-	internal sealed class PostalMailOutlineSanitizer : MonoBehaviour
-	{
-		internal static void Attach(GameObject prefab)
-		{
-			if (prefab != null && prefab.GetComponent<PostalMailOutlineSanitizer>() == null)
-			{
-				prefab.AddComponent<PostalMailOutlineSanitizer>();
-			}
-		}
-
-		private void Awake()
-		{
-			// Runtime directory templates already contain the Outline added by the
-			// donor's GoPointerButton.Start. Remove copied outlines before this
-			// clone's own Start creates the one GoPointerButton controls.
-			foreach (Outline outline in GetComponents<Outline>())
-			{
-				Object.DestroyImmediate(outline);
-			}
-		}
-	}
-
 	[HarmonyPatch(typeof(ShipItem), "AddLODGroup")]
 	internal static class PostalShipItemLodPatch
 	{
 		private static bool Prefix(ShipItem __instance)
 		{
-			SaveablePrefab saveable = __instance?.GetComponent<SaveablePrefab>();
-			if (saveable == null ||
-				!PostalMail.IsMailPrefab(saveable) ||
-				saveable.prefabIndex == PostalMail.RegularMailItemIndex)
-			{
-				return true;
-			}
+			SaveablePrefab saveable = __instance != null ? __instance.GetComponent<SaveablePrefab>() : null;
+			return !(PostalMail.IsExpressMail(saveable) || PostalMail.IsRegisteredLetter(saveable)) ||
+				!Apply(__instance);
+		}
 
-			LODGroup template = RefsDirectory.instance?.LODtemplateItems;
-			LOD[] lods = template?.GetLODs();
+		// The game's item distance group over every renderer of the item, the seal's too. Also run on a mail item turned into Express
+		// Mail or a Registered Letter after the game built its group (an item loaded from a save).
+		internal static bool Apply(ShipItem item)
+		{
+			LODGroup template = RefsDirectory.instance != null ? RefsDirectory.instance.LODtemplateItems : null;
+			LOD[] lods = template != null ? template.GetLODs() : null;
 			if (lods == null || lods.Length == 0)
 			{
-				return true;
+				return false;
 			}
 
-			LODGroup itemLodGroup = __instance.GetComponent<LODGroup>() ??
-				__instance.gameObject.AddComponent<LODGroup>();
+			LODGroup itemLodGroup = item.GetComponent<LODGroup>();
+			if (itemLodGroup == null)
+			{
+				itemLodGroup = item.gameObject.AddComponent<LODGroup>();
+			}
+
 			LOD[] configuredLods = (LOD[])lods.Clone();
-			configuredLods[0].renderers =
-				__instance.GetComponentsInChildren<Renderer>(true);
+			configuredLods[0].renderers = item.GetComponentsInChildren<Renderer>(true);
 			itemLodGroup.SetLODs(configuredLods);
-			return false;
+			return true;
 		}
 	}
 
@@ -661,10 +587,6 @@ namespace PostalExpansion
 		private static MissionListUI patchedUi;
 		private static PostalMailTabButton mailButton;
 		private static bool mailMissions;
-
-		// Set while the office list shows the player's own missions (Mission Rework's "Active" view
-		// passes PlayerMissions.missions); that list and its page count are then left as they are.
-		private static bool showingPlayerMissions;
 
 		internal static void EnsureMailButton(MissionListUI ui)
 		{
@@ -739,28 +661,38 @@ namespace PostalExpansion
 			UpdateTabMaterials(ui);
 		}
 
+		internal static bool MailTabShown => mailMissions;
+
 		internal static void SetMailMissions(bool mail)
 		{
 			mailMissions = mail;
 			UpdateTabMaterials(MissionListUI.instance);
+			PostalRegionFilter.Refresh();
 		}
 
-		internal static void FilterInitialPortMissions(
+		// Returns the Local list's size, or -1 when the list is left as it is: the player's own
+		// missions (Mission Rework's "Active" view passes PlayerMissions.missions).
+		internal static int FilterInitialPortMissions(
 			MissionListUI ui,
 			PortDude dude,
 			ref Mission[] missions)
 		{
-			showingPlayerMissions =
-				missions != null && missions == PlayerMissions.missions;
-			if (ui != null && dude != null && !showingPlayerMissions)
+			if (ui == null ||
+				dude == null ||
+				(missions != null && missions == PlayerMissions.missions))
 			{
-				missions = GetMissions(ui, dude.GetPort(), PostalMissionTab.Local, 0);
+				return -1;
 			}
+
+			List<Mission> available =
+				GetAvailableMissions(dude.GetPort(), PostalMissionTab.Local);
+			missions = GetPage(ui, available, 0);
+			return available.Count;
 		}
 
-		internal static void RefreshPageCount(MissionListUI ui)
+		internal static void RefreshPageCount(MissionListUI ui, int missionCount)
 		{
-			if (showingPlayerMissions ||
+			if (missionCount < 0 ||
 				!HasMissionListPagingReflection() ||
 				ui == null ||
 				GetCurrentPortDude(ui) == null)
@@ -768,7 +700,7 @@ namespace PostalExpansion
 				return;
 			}
 
-			UpdatePageCount(ui);
+			SetPageCount(ui, missionCount);
 			UpdatePageCountText(ui);
 		}
 
@@ -782,12 +714,18 @@ namespace PostalExpansion
 				return false;
 			}
 
-			SetCurrentPage(ui, 0);
 			UISoundPlayer.instance.PlayParchmentSound();
-			ui.DisplayMissions(GetMissions(ui, GetCurrentPage(ui)));
-			UpdatePageCount(ui);
-			UpdatePageCountText(ui);
+			ShowFirstPage(ui);
 			return true;
+		}
+
+		private static void ShowFirstPage(MissionListUI ui)
+		{
+			SetCurrentPage(ui, 0);
+			List<Mission> available = GetCurrentTabMissions(ui);
+			ui.DisplayMissions(GetPage(ui, available, 0));
+			SetPageCount(ui, available.Count);
+			UpdatePageCountText(ui);
 		}
 
 		internal static bool TryChangePage(MissionListUI ui, int pageChange)
@@ -815,7 +753,8 @@ namespace PostalExpansion
 			else
 			{
 				UISoundPlayer.instance.PlayParchmentSound();
-				ui.DisplayMissions(GetMissions(ui, GetCurrentPage(ui)));
+				ui.DisplayMissions(
+					GetPage(ui, GetCurrentTabMissions(ui), GetCurrentPage(ui)));
 			}
 
 			UpdatePageCountText(ui);
@@ -844,7 +783,7 @@ namespace PostalExpansion
 			}
 
 			PlayerMissions.AcceptMission(currentMission);
-			missionListUi.DisplayMissions(GetMissions(missionListUi, 0));
+			ShowFirstPage(missionListUi);
 			var detailsObject = DetailsUiField.GetValue(detailsUi) as GameObject;
 			if (detailsObject != null)
 			{
@@ -906,25 +845,20 @@ namespace PostalExpansion
 			}
 		}
 
-		private static Mission[] GetMissions(MissionListUI ui, int page)
+		private static List<Mission> GetCurrentTabMissions(MissionListUI ui)
 		{
-			return GetMissions(
-				ui,
+			return GetAvailableMissions(
 				GetCurrentPortDude(ui).GetPort(),
-				GetCurrentTab(ui),
-				page);
+				GetCurrentTab(ui));
 		}
 
-		private static Mission[] GetMissions(
+		private static Mission[] GetPage(
 			MissionListUI ui,
-			Port port,
-			PostalMissionTab tab,
+			List<Mission> availableMissions,
 			int page)
 		{
-			int pageSize = GetMissionPageSize(ui);
-			var pageMissions = new Mission[pageSize];
-			int startIndex = page * pageSize;
-			List<Mission> availableMissions = GetAvailableMissions(port, tab);
+			var pageMissions = new Mission[GetMissionPageSize(ui)];
+			int startIndex = page * pageMissions.Length;
 			for (int i = 0; i < pageMissions.Length; i++)
 			{
 				int missionIndex = startIndex + i;
@@ -972,8 +906,33 @@ namespace PostalExpansion
 					missions);
 			}
 
-			missions.Sort((left, right) => right.pricePerKm.CompareTo(left.pricePerKm));
+			if (tab == PostalMissionTab.Mail)
+			{
+				PostalRegionFilter.Apply(missions);
+				SortByReputation(missions);
+			}
+			else
+			{
+				missions.Sort((left, right) => right.pricePerKm.CompareTo(left.pricePerKm));
+			}
+
 			return missions;
+		}
+
+		// Highest reputation first, ties by gold per mile; each mission's reputation worked out once.
+		private static void SortByReputation(List<Mission> missions)
+		{
+			var reputation = new Dictionary<Mission, int>(missions.Count);
+			foreach (Mission mission in missions)
+			{
+				reputation[mission] = MissionReputationRewardPatch.TotalReputation(mission);
+			}
+
+			missions.Sort((left, right) =>
+			{
+				int order = reputation[right].CompareTo(reputation[left]);
+				return order != 0 ? order : right.pricePerKm.CompareTo(left.pricePerKm);
+			});
 		}
 
 		private static void AddFilteredVanillaMissions(
@@ -1013,28 +972,15 @@ namespace PostalExpansion
 
 		private static bool ShouldShowMission(Mission candidate, PostalMissionTab tab)
 		{
-			bool mail = IsMailMission(candidate);
+			bool mail = PostalMail.IsMailPrefab(PostalMail.SaveableOf(candidate));
 			return tab == PostalMissionTab.Mail ? mail : !mail;
 		}
 
-		private static bool IsMailMission(Mission candidate)
+		private static void SetPageCount(MissionListUI ui, int missionCount)
 		{
-			if (candidate == null || candidate.goodPrefab == null)
-			{
-				return false;
-			}
-
-			SaveablePrefab saveable = candidate.goodPrefab.GetComponent<SaveablePrefab>();
-			return PostalMail.IsMailPrefab(saveable);
-		}
-
-		private static void UpdatePageCount(MissionListUI ui)
-		{
-			int pageSize = GetMissionPageSize(ui);
-			int missionCount = GetAvailableMissions(
-				GetCurrentPortDude(ui).GetPort(),
-				GetCurrentTab(ui)).Count;
-			int pageCount = Mathf.Max(1, Mathf.CeilToInt((float)missionCount / pageSize));
+			int pageCount = Mathf.Max(
+				1,
+				Mathf.CeilToInt((float)missionCount / GetMissionPageSize(ui)));
 			CurrentPageCountField.SetValue(ui, pageCount);
 		}
 
@@ -1195,25 +1141,489 @@ namespace PostalExpansion
 		}
 	}
 
+	// The Mail tab's Region dropdown, built as EconomyOverhaul's board builds its own (which then filters every tab, so this one is made
+	// only without it): plates copied from the list's back button, left of the list under its page buttons, so they show only while the
+	// port's offers do. A click on the head opens the choices under it; a choice filters the Mail tab by the destination's region and goes
+	// back to page 1. Kept for the game session, not saved.
+	internal static class PostalRegionFilter
+	{
+		private const string EconomyOverhaulGuid = "DogEggz.EconomyOverhaul";
+		private const string SourceButtonName = "mission button (back)";
+
+		// In the page buttons' frame (+x is the screen's left): the list's tabs stand at y 0.19, its rows 0.049 apart. X and Width (a share
+		// of the back button's width) only where the room left of the list can't be measured.
+		private const float X = 0.40f;
+		private const float Y = 0.19f;
+		private const float Step = 0.049f;
+		private const float Width = 0.62f;
+		private const float MinWidth = 0.3f;
+		private const float ListGap = 0.016f;
+		private const float EdgeMargin = 0.02f;
+		private const float Shade = 0.78f;
+
+		private static readonly string[] Names = { "All regions", "Al'Ankh", "Emerald", "Aestrin" };
+		private static readonly FieldInfo PageButtonsField =
+			AccessTools.Field(typeof(MissionListUI), "pageButtons");
+		private static readonly FieldInfo PortWelcomeField =
+			AccessTools.Field(typeof(MissionListUI), "portWelcome");
+		private static readonly FieldInfo CurrentPortDudeField =
+			AccessTools.Field(typeof(MissionListUI), "currentPortDude");
+
+		private static readonly List<Plate> Choices = new List<Plate>();
+
+		private static bool? economyOverhaul;
+		private static int region = -1;
+		private static bool open;
+		// shortcut: once the plates are not found the dropdown is not tried again this session; replace with a retry at the next opening if
+		// the list ever lacks them only for a moment.
+		private static bool failed;
+		private static float builtRoom = float.NaN;
+		private static MissionListUI builtFor;
+		private static Plate head;
+		private static GameObject stash;
+		private static Camera uiCamera;
+
+		private sealed class Plate
+		{
+			internal GameObject Root;
+			internal TextMesh Text;
+			internal Material Material;
+			internal Vector3 TextScale;
+			internal float TextWidth;
+		}
+
+		internal static void Apply(List<Mission> missions)
+		{
+			if (region < 0 || HasEconomyOverhaul())
+			{
+				return;
+			}
+
+			missions.RemoveAll(mission => (int)mission.destinationPort.region != region);
+		}
+
+		internal static void Opened(MissionListUI ui)
+		{
+			if (ui == null || failed || HasEconomyOverhaul())
+			{
+				return;
+			}
+
+			float room = Room(ui, out float listLeft);
+			if (head != null &&
+				(builtFor != ui || head.Root == null || !SameRoom(room, builtRoom)))
+			{
+				Unmake();
+			}
+
+			if (head == null && !Build(ui, room, listLeft))
+			{
+				Unmake();
+				failed = true;
+				Debug.LogWarning("Postal Expansion: the mission list's plates were not found; no region dropdown.");
+				return;
+			}
+
+			open = false;
+			Refresh();
+		}
+
+		internal static void Refresh()
+		{
+			if (head == null || head.Root == null)
+			{
+				return;
+			}
+
+			bool shown = PostalMissionUi.MailTabShown;
+			head.Root.SetActive(shown);
+			SetText(head, "Region: " + Names[region + 1]);
+			for (int i = 0; i < Choices.Count; i++)
+			{
+				Plate choice = Choices[i];
+				if (choice.Material.HasProperty("_Color"))
+				{
+					choice.Material.color = i == region + 1 ? Color.white : new Color(Shade, Shade, Shade, 1f);
+				}
+
+				choice.Root.SetActive(shown && open);
+			}
+		}
+
+		private static bool HasEconomyOverhaul()
+		{
+			if (economyOverhaul == null)
+			{
+				economyOverhaul = BepInEx.Bootstrap.Chainloader.PluginInfos.ContainsKey(EconomyOverhaulGuid);
+			}
+
+			return economyOverhaul.Value;
+		}
+
+		private static bool SameRoom(float a, float b)
+		{
+			return (float.IsNaN(a) && float.IsNaN(b)) || Mathf.Abs(a - b) < 0.002f;
+		}
+
+		private static bool Build(MissionListUI ui, float room, float listLeft)
+		{
+			var pages = PageButtonsField?.GetValue(ui) as GameObject;
+			if (pages == null || pages.transform.parent == null)
+			{
+				return false;
+			}
+
+			// Mission Rework moves the back button out of the page buttons: looked for under their parent.
+			Transform source = FindChild(pages.transform.parent, SourceButtonName);
+			Transform sourceBg = source != null ? source.Find("bg+trigger") : null;
+			MeshRenderer sourceRenderer = sourceBg != null ? sourceBg.GetComponent<MeshRenderer>() : null;
+			if (sourceRenderer == null || sourceRenderer.GetComponent<MeshFilter>() == null)
+			{
+				return false;
+			}
+
+			// The plates fill the room left of the list, at most Width of a row, at least MinWidth.
+			float full = InFrameBounds(sourceRenderer, pages.transform).size.x;
+			float share = Width;
+			float x = X;
+			if (!float.IsNaN(room) && full > 0f)
+			{
+				share = Mathf.Clamp(room / full, MinWidth, Width);
+				x = listLeft + ListGap + full * share / 2f;
+			}
+
+			builtFor = ui;
+			builtRoom = room;
+			head = MakePlate(pages.transform, source, "postal_expansion_region", x, Y, share, Toggle);
+			if (head == null)
+			{
+				return false;
+			}
+
+			for (int i = 0; i < Names.Length; i++)
+			{
+				int choiceRegion = i - 1;
+				Plate choice = MakePlate(
+					pages.transform,
+					source,
+					"postal_expansion_region_choice_" + i,
+					x,
+					Y - Step * (i + 1),
+					share,
+					() => Pick(choiceRegion));
+				if (choice == null)
+				{
+					return false;
+				}
+
+				SetText(choice, Names[i]);
+				choice.Root.SetActive(false);
+				Choices.Add(choice);
+			}
+
+			return true;
+		}
+
+		private static void Unmake()
+		{
+			foreach (Plate plate in Choices)
+			{
+				DestroyPlate(plate);
+			}
+
+			Choices.Clear();
+			DestroyPlate(head);
+			head = null;
+			builtFor = null;
+		}
+
+		private static void DestroyPlate(Plate plate)
+		{
+			if (plate == null)
+			{
+				return;
+			}
+
+			if (plate.Material != null)
+			{
+				Object.Destroy(plate.Material);
+			}
+
+			if (plate.Root != null)
+			{
+				Object.Destroy(plate.Root);
+			}
+		}
+
+		// A copy of the back button without its button and outline (removed while inactive), narrowed along the plate's width, its
+		// middle at x, with its own material and button.
+		private static Plate MakePlate(
+			Transform parent,
+			Transform source,
+			string name,
+			float x,
+			float y,
+			float share,
+			Action action)
+		{
+			if (stash == null)
+			{
+				stash = new GameObject("postal_expansion_ui_stash");
+				stash.SetActive(false);
+				Object.DontDestroyOnLoad(stash);
+			}
+
+			GameObject copy = Object.Instantiate(source.gameObject, stash.transform, false);
+			foreach (Component component in copy.GetComponentsInChildren<Component>(true))
+			{
+				if (component is GoPointerButton || (component != null && component.GetType().Name == "Outline"))
+				{
+					Object.DestroyImmediate(component);
+				}
+			}
+
+			copy.transform.SetParent(parent, false);
+			copy.SetActive(true);
+			copy.name = name;
+			copy.transform.localPosition = new Vector3(x, y, source.localPosition.z);
+
+			Transform bg = copy.transform.Find("bg+trigger");
+			Transform textObject = copy.transform.Find("text");
+			TextMesh text = textObject != null ? textObject.GetComponent<TextMesh>() : null;
+			MeshRenderer renderer = bg != null ? bg.GetComponent<MeshRenderer>() : null;
+			MeshFilter filter = bg != null ? bg.GetComponent<MeshFilter>() : null;
+			if (text == null || renderer == null || filter == null || bg.GetComponent<Collider>() == null)
+			{
+				Object.Destroy(copy);
+				return null;
+			}
+
+			Vector3 scale = bg.localScale;
+			int axis = 0;
+			float most = -1f;
+			for (int a = 0; a < 3; a++)
+			{
+				Vector3 direction = bg.localRotation *
+					(a == 0 ? Vector3.right : a == 1 ? Vector3.up : Vector3.forward);
+				if (Mathf.Abs(direction.x) > most)
+				{
+					most = Mathf.Abs(direction.x);
+					axis = a;
+				}
+			}
+
+			scale[axis] *= share;
+			bg.localScale = scale;
+			Vector3 position = copy.transform.localPosition;
+			position.x += x - InFrameBounds(renderer, parent).center.x;
+			copy.transform.localPosition = position;
+
+			var material = new Material(renderer.sharedMaterial);
+			renderer.sharedMaterial = material;
+			PostalPlateButton button = bg.gameObject.AddComponent<PostalPlateButton>();
+			button.Action = () =>
+			{
+				if (UISoundPlayer.instance != null)
+				{
+					UISoundPlayer.instance.PlayUIClickSound();
+				}
+
+				action();
+			};
+
+			text.color = Color.black;
+			text.text = string.Empty;
+			return new Plate
+			{
+				Root = copy,
+				Text = text,
+				Material = material,
+				TextScale = text.transform.localScale,
+				TextWidth = filter.sharedMesh != null ? filter.sharedMesh.bounds.size[axis] * scale[axis] * 0.9f : 0f
+			};
+		}
+
+		// The text at its own size, shrunk to the plate's width when longer.
+		private static void SetText(Plate plate, string value)
+		{
+			if (plate.Text.text == value)
+			{
+				return;
+			}
+
+			TextMesh text = plate.Text;
+			text.text = value;
+			text.transform.localScale = plate.TextScale;
+			if (plate.TextWidth <= 0f || text.font == null)
+			{
+				return;
+			}
+
+			text.font.RequestCharactersInTexture(value, text.fontSize, text.fontStyle);
+			float width = 0f;
+			foreach (char character in value)
+			{
+				if (text.font.GetCharacterInfo(character, out CharacterInfo info, text.fontSize, text.fontStyle))
+				{
+					width += info.advance * 0.1f * text.characterSize * plate.TextScale.x;
+				}
+			}
+
+			if (width > plate.TextWidth)
+			{
+				text.transform.localScale = plate.TextScale * (plate.TextWidth / width);
+			}
+		}
+
+		private static void Toggle()
+		{
+			open = !open;
+			Refresh();
+		}
+
+		private static void Pick(int choiceRegion)
+		{
+			region = choiceRegion;
+			open = false;
+			Refresh();
+			MissionListUI ui = MissionListUI.instance;
+			PortDude dude = ui != null ? CurrentPortDudeField?.GetValue(ui) as PortDude : null;
+			if (dude != null)
+			{
+				ui.ResetPage();
+			}
+		}
+
+		// The room left of the list on the player's screen, in the page buttons' frame: from the list's left edge (its back button's and
+		// welcome box's) to the screen's edge, seen through the camera that draws the list. NaN where it can't be measured.
+		private static float Room(MissionListUI ui, out float listLeft)
+		{
+			listLeft = 0f;
+			var pages = PageButtonsField?.GetValue(ui) as GameObject;
+			if (pages == null || pages.transform.parent == null)
+			{
+				return float.NaN;
+			}
+
+			Transform frame = pages.transform;
+			Transform source = FindChild(frame.parent, SourceButtonName);
+			Transform bg = source != null ? source.Find("bg+trigger") : null;
+			MeshRenderer renderer = bg != null ? bg.GetComponent<MeshRenderer>() : null;
+			if (renderer == null || renderer.GetComponent<MeshFilter>() == null)
+			{
+				return float.NaN;
+			}
+
+			listLeft = InFrameBounds(renderer, frame).max.x;
+			var welcome = PortWelcomeField?.GetValue(ui) as GameObject;
+			if (welcome != null)
+			{
+				foreach (MeshRenderer welcomeRenderer in welcome.GetComponentsInChildren<MeshRenderer>(true))
+				{
+					if (welcomeRenderer.GetComponent<MeshFilter>() != null)
+					{
+						listLeft = Mathf.Max(listLeft, InFrameBounds(welcomeRenderer, frame).max.x);
+					}
+				}
+			}
+
+			if (uiCamera == null)
+			{
+				GameObject cameraObject = GameObject.Find("UI camera");
+				uiCamera = cameraObject != null ? cameraObject.GetComponent<Camera>() : null;
+			}
+
+			Camera camera = uiCamera != null ? uiCamera : Camera.main;
+			if (camera == null)
+			{
+				return float.NaN;
+			}
+
+			Vector3 at = frame.TransformPoint(new Vector3(listLeft, Y, source.localPosition.z));
+			Ray ray = camera.ScreenPointToRay(new Vector3(
+				camera.pixelRect.xMin + camera.pixelWidth * EdgeMargin,
+				camera.WorldToScreenPoint(at).y,
+				0f));
+			if (!new Plane(frame.TransformDirection(Vector3.forward), at).Raycast(ray, out float distance))
+			{
+				return float.NaN;
+			}
+
+			return frame.InverseTransformPoint(ray.GetPoint(distance)).x - listLeft - ListGap;
+		}
+
+		private static Transform FindChild(Transform root, string name)
+		{
+			foreach (Transform child in root.GetComponentsInChildren<Transform>(true))
+			{
+				if (child.name == name)
+				{
+					return child;
+				}
+			}
+
+			return null;
+		}
+
+		private static Bounds InFrameBounds(MeshRenderer renderer, Transform frame)
+		{
+			Bounds raw = renderer.GetComponent<MeshFilter>().sharedMesh.bounds;
+			var bounds = new Bounds(
+				frame.InverseTransformPoint(renderer.transform.TransformPoint(raw.center)),
+				Vector3.zero);
+			for (int i = 0; i < 8; i++)
+			{
+				Vector3 corner = raw.center + Vector3.Scale(raw.extents, new Vector3(
+					(i & 1) == 0 ? -1f : 1f,
+					(i & 2) == 0 ? -1f : 1f,
+					(i & 4) == 0 ? -1f : 1f));
+				bounds.Encapsulate(frame.InverseTransformPoint(renderer.transform.TransformPoint(corner)));
+			}
+
+			return bounds;
+		}
+	}
+
+	internal sealed class PostalPlateButton : GoPointerButton
+	{
+		internal Action Action;
+
+		public override void OnActivate()
+		{
+			if (!unclickable)
+			{
+				Action?.Invoke();
+			}
+		}
+	}
+
 	[HarmonyPatch(typeof(MissionListUI), "EnablePortMissionUI")]
 	internal static class MissionListUiEnablePortPatch
 	{
-		private static void Prefix(MissionListUI __instance, ref Mission[] missions, PortDude dude)
+		private static void Prefix(
+			MissionListUI __instance,
+			ref Mission[] missions,
+			PortDude dude,
+			out int __state)
 		{
-			PostalMissionUi.FilterInitialPortMissions(__instance, dude, ref missions);
+			__state = PostalMissionUi.FilterInitialPortMissions(
+				__instance,
+				dude,
+				ref missions);
 		}
 
-		private static void Postfix(MissionListUI __instance)
+		private static void Postfix(MissionListUI __instance, int __state)
 		{
 			PostalMissionUi.EnsureMailButton(__instance);
-			PostalMissionUi.RefreshPageCount(__instance);
+			PostalMissionUi.RefreshPageCount(__instance, __state);
+			PostalRegionFilter.Opened(__instance);
 		}
 	}
 
 	[HarmonyPatch(typeof(MissionListUI), "SetWorldMissions")]
 	internal static class MissionListUiSetWorldPatch
 	{
-		private static void Postfix(MissionListUI __instance)
+		private static void Postfix()
 		{
 			if (GameState.inPortMissionList)
 			{
@@ -1258,21 +1668,19 @@ namespace PostalExpansion
 		}
 	}
 
-	// Shows the mission's reputation reward under its gold reward on every mission page, as
-	// EconomyOverhaul's approved mission page does: the gold at 0.8 size, "N reputation" as big
-	// under it. The value is the game's own per-unit reputation (GetDeliveryRep, with this mod's
-	// mail rules and any other mod's patches applied) times the cargo count, as of today, so a
-	// late mission shows its reduced reward or penalty.
-	// EconomyOverhaul's own mission page (its MissionPage class, from its mission rework) lays out
-	// the reward itself, the reputation of every mission included, so with it this patch does nothing.
+	// Shows the mission's reputation reward under its gold reward on every mission page: the gold
+	// at 0.8 size, "N reputation" as big under it. N is the game's per-unit reputation
+	// (GetDeliveryRep, with this mod's mail rules and other mods' patches) times the cargo count,
+	// as of today, so a late mission shows its reduced reward or penalty.
+	// Does nothing with EconomyOverhaul's MissionPage class loaded: that page draws the line itself.
 	[HarmonyPatch(typeof(MissionDetailsUI), "InsertMissionData")]
 	internal static class MissionReputationRewardPatch
 	{
 		internal const string ReputationObjectName = "postal_expansion_reputation_reward";
 
 		private const float GoldSize = 0.8f;
-		// In the page's own frame; spacing from EconomyOverhaul's approved mockup (gold at -.170,
-		// reputation at -.252). The raises keep the line clear of the Accept button.
+		// In the page's own frame: the gap between the gold (-.170) and reputation (-.252) lines
+		// of EconomyOverhaul's page. The raises keep the line clear of the Accept button.
 		private const float ReputationSpacing = 0.082f;
 		private const float GoldRaise = 0.021f;
 		private const float RewardLabelRaise = 0.032f;
@@ -1290,6 +1698,11 @@ namespace PostalExpansion
 
 		// Looked up at the first page shown, when every plugin is loaded.
 		private static bool? economyOverhaulPage;
+
+		internal static int TotalReputation(Mission mission)
+		{
+			return GetDeliveryRep != null ? GetDeliveryRep(mission) * mission.goodCount : 0;
+		}
 
 		private static void Postfix(MissionDetailsUI __instance, Mission mission)
 		{
@@ -1317,7 +1730,7 @@ namespace PostalExpansion
 				return;
 			}
 
-			TextMesh reputationText = FindText(
+			TextMesh reputationText = LetterMissionDetailsPatch.FindText(
 				totalGoldText.transform.parent,
 				ReputationObjectName) ?? CreateReputationText(__instance, totalGoldText);
 			if (reputationText == null)
@@ -1325,8 +1738,7 @@ namespace PostalExpansion
 				return;
 			}
 
-			int total = GetDeliveryRep(mission) * mission.goodCount;
-			reputationText.text = total + " reputation";
+			reputationText.text = TotalReputation(mission) + " reputation";
 			reputationText.gameObject.SetActive(true);
 		}
 
@@ -1340,7 +1752,9 @@ namespace PostalExpansion
 			Raise(totalGoldText.transform, GoldRaise);
 
 			var pageRoot = PageRootField?.GetValue(page) as GameObject;
-			TextMesh rewardLabel = FindTextByContent(pageRoot, "Reward:");
+			TextMesh rewardLabel = LetterMissionDetailsPatch.FindTextByContent(
+				pageRoot != null ? pageRoot.transform : null,
+				"Reward:");
 			if (rewardLabel != null)
 			{
 				Raise(rewardLabel.transform, RewardLabelRaise);
@@ -1380,34 +1794,6 @@ namespace PostalExpansion
 			position.y += amount;
 			target.localPosition = position;
 		}
-
-		private static TextMesh FindText(Transform root, string objectName)
-		{
-			Transform child = root.Find(objectName);
-			return child != null ? child.GetComponent<TextMesh>() : null;
-		}
-
-		private static TextMesh FindTextByContent(GameObject root, string content)
-		{
-			if (root == null)
-			{
-				return null;
-			}
-
-			foreach (TextMesh candidate in root.GetComponentsInChildren<TextMesh>(true))
-			{
-				if (candidate != null &&
-					string.Equals(
-						(candidate.text ?? string.Empty).Trim(),
-						content,
-						StringComparison.Ordinal))
-				{
-					return candidate;
-				}
-			}
-
-			return null;
-		}
 	}
 
 	[HarmonyPatch(typeof(PlayerMissions), "AcceptMission")]
@@ -1422,6 +1808,18 @@ namespace PostalExpansion
 		}
 	}
 
+	// The game takes an accepted mission's cargo out of the origin office's warehouse by its prefab number. Express Mail and Registered
+	// Letters have the mail's number but come from no warehouse stock, so the office's mail is left.
+	[HarmonyPatch(typeof(IslandMissionOffice), nameof(IslandMissionOffice.AcceptMission))]
+	internal static class PostalWarehousePatch
+	{
+		private static bool Prefix(Mission mission)
+		{
+			SaveablePrefab saveable = PostalMail.SaveableOf(mission);
+			return !PostalMail.IsExpressMail(saveable) && !PostalMail.IsRegisteredLetter(saveable);
+		}
+	}
+
 	[HarmonyPatch(typeof(SaveLoadManager), "SaveModData")]
 	internal static class PostalMissionSavePatch
 	{
@@ -1432,6 +1830,7 @@ namespace PostalExpansion
 			RegisteredLetterMissions.SavePersistentState();
 			AnonymousLetterMissions.SavePersistentState();
 			SpecialMailHistory.SavePersistentState();
+			PostalItemKinds.SavePersistentState();
 		}
 	}
 
@@ -1445,6 +1844,7 @@ namespace PostalExpansion
 			RegisteredLetterMissions.LoadPersistentState();
 			AnonymousLetterMissions.LoadPersistentState();
 			SpecialMailHistory.LoadPersistentState();
+			PostalItemKinds.AfterLoad();
 			LetterMissionDebug.Reset();
 		}
 	}
@@ -1468,18 +1868,236 @@ namespace PostalExpansion
 	{
 		private static void Prefix()
 		{
-			PrefabsDirectory directory = PrefabsDirectory.instance;
-			Letter.EnsureRegistered(directory);
-			PostalExpressMail.EnsureRegistered(directory);
+			Letter.EnsureTemplate();
+			PostalExpressMail.EnsureTemplate();
 		}
 	}
 
+	// Express Mail and Registered Letters save as the game's mail (prefab 221). The mod records which missions hold them and gives them
+	// back their kind at load: each mission as the game builds it (before the mission log and the items), each item as it joins its
+	// mission (so also an item a far boat makes from the save later).
+	internal static class PostalItemKinds
+	{
+		private const string SaveKey = "PostalExpansion.ItemKinds.v1";
+		private const int ExpressKind = 1;
+		private const int LetterKind = 2;
+
+		private static readonly Dictionary<int, int[]> PendingMissions = new Dictionary<int, int[]>();
+
+		// "slot,kind,origin,destination" for each Express Mail and Registered Letter mission held.
+		internal static void SavePersistentState()
+		{
+			if (GameState.modData == null)
+			{
+				GameState.modData = new Dictionary<string, string>();
+			}
+
+			var entries = new List<string>();
+			Mission[] missions = PlayerMissions.missions;
+			for (int i = 0; missions != null && i < missions.Length; i++)
+			{
+				int kind = KindOf(missions[i]);
+				if (kind != 0 && missions[i].originPort != null && missions[i].destinationPort != null)
+				{
+					entries.Add(string.Join(",", i, kind, missions[i].originPort.portIndex, missions[i].destinationPort.portIndex));
+				}
+			}
+
+			GameState.modData[SaveKey] = string.Join(";", entries);
+		}
+
+		// Before the game builds anything from the save: the recorded kinds, and a save from 1.1.3 or older turned to prefab 221.
+		internal static void BeforeLoad(SaveContainer save)
+		{
+			PendingMissions.Clear();
+			if (save == null)
+			{
+				return;
+			}
+
+			if (save.modData != null && save.modData.TryGetValue(SaveKey, out string data))
+			{
+				foreach (string entry in data.Split(new[] { ';' }, StringSplitOptions.RemoveEmptyEntries))
+				{
+					string[] fields = entry.Split(',');
+					if (fields.Length == 4 &&
+						int.TryParse(fields[0], out int slot) &&
+						int.TryParse(fields[1], out int kind) &&
+						int.TryParse(fields[2], out int origin) &&
+						int.TryParse(fields[3], out int destination) &&
+						(kind == ExpressKind || kind == LetterKind))
+					{
+						PendingMissions[slot] = new[] { kind, origin, destination };
+					}
+				}
+			}
+
+			MigrateLegacySave(save);
+		}
+
+		internal static void MissionLoaded(Mission mission, SaveMissionData data)
+		{
+			if (mission == null ||
+				data == null ||
+				data.goodPrefabIndex != PostalMail.RegularMailItemIndex ||
+				!PendingMissions.TryGetValue(data.missionIndex, out int[] entry) ||
+				entry[1] != data.originPort ||
+				entry[2] != data.destinationPort)
+			{
+				return;
+			}
+
+			GameObject template = entry[0] == ExpressKind ? PostalExpressMail.Prefab : Letter.Prefab;
+			if (template == null || mission.destinationPort == null)
+			{
+				return;
+			}
+
+			mission.goodPrefab = template;
+			mission.missionName = template.GetComponent<ShipItem>().name + " to " + mission.destinationPort.GetPortName();
+		}
+
+		internal static void AfterLoad()
+		{
+			PendingMissions.Clear();
+		}
+
+		// A mail item joining an Express or letter mission is turned into that item; one made from the mod's template already is.
+		internal static void GoodJoining(Mission mission, GameObject good)
+		{
+			if (good == null || mission == null || mission.goodPrefab == null)
+			{
+				return;
+			}
+
+			int kind = KindOf(mission);
+			SaveablePrefab saveable = good.GetComponent<SaveablePrefab>();
+			if (kind == 0 ||
+				saveable == null ||
+				saveable.prefabIndex != PostalMail.RegularMailItemIndex ||
+				PostalMail.IsExpressMail(saveable) ||
+				PostalMail.IsRegisteredLetter(saveable))
+			{
+				return;
+			}
+
+			if (kind == ExpressKind)
+			{
+				PostalExpressMail.Configure(good);
+			}
+			else
+			{
+				Letter.Configure(good);
+			}
+
+			PostalShipItemLodPatch.Apply(good.GetComponent<ShipItem>());
+		}
+
+		private static int KindOf(Mission mission)
+		{
+			SaveablePrefab saveable = PostalMail.SaveableOf(mission);
+			return PostalMail.IsExpressMail(saveable)
+				? ExpressKind
+				: PostalMail.IsRegisteredLetter(saveable) ? LetterKind : 0;
+		}
+
+		// Up to 1.1.3 a Registered Letter saved as prefab 238 and Express Mail as 239: missions, items and log rows. Turned to 221 here,
+		// the missions' kinds kept as if this mod had recorded them, the log rows' kinds given to the mission log's history.
+		private static void MigrateLegacySave(SaveContainer save)
+		{
+			if (save.savedMissions != null)
+			{
+				foreach (SaveMissionData mission in save.savedMissions)
+				{
+					int kind = LegacyKind(mission != null ? mission.goodPrefabIndex : 0);
+					if (kind != 0)
+					{
+						mission.goodPrefabIndex = PostalMail.RegularMailItemIndex;
+						PendingMissions[mission.missionIndex] = new[] { kind, mission.originPort, mission.destinationPort };
+					}
+				}
+			}
+
+			if (save.savedPrefabs != null)
+			{
+				foreach (SavePrefabData item in save.savedPrefabs)
+				{
+					if (item != null && LegacyKind(item.prefabIndex) != 0)
+					{
+						item.prefabIndex = PostalMail.RegularMailItemIndex;
+					}
+				}
+			}
+
+			var legacyRows = new Dictionary<int, SpecialMailKind>();
+			for (int i = 0; save.loggedMissions != null && i < save.loggedMissions.Length; i++)
+			{
+				LoggedMission row = save.loggedMissions[i];
+				int kind = LegacyKind(row != null ? row.goodIndex : 0);
+				if (kind != 0)
+				{
+					row.goodIndex = PostalMail.RegularMailItemIndex;
+					legacyRows[i] = kind == ExpressKind ? SpecialMailKind.ExpressMail : SpecialMailKind.RegisteredLetter;
+				}
+			}
+
+			if (legacyRows.Count > 0)
+			{
+				if (save.modData == null)
+				{
+					save.modData = new Dictionary<string, string>();
+				}
+
+				SpecialMailHistory.MigrateLegacyRows(save.modData, save.loggedMissions, legacyRows);
+			}
+		}
+
+		private static int LegacyKind(int prefabIndex)
+		{
+			return prefabIndex == PostalMail.LegacyExpressMailItemIndex
+				? ExpressKind
+				: prefabIndex == PostalMail.LegacyRegisteredLetterItemIndex ? LetterKind : 0;
+		}
+	}
+
+	[HarmonyPatch(typeof(SaveLoadManager), "LoadNeeds")]
+	internal static class PostalItemKindsLoadPatch
+	{
+		private static void Prefix(SaveContainer save)
+		{
+			PostalItemKinds.BeforeLoad(save);
+		}
+	}
+
+	[HarmonyPatch(typeof(Mission), MethodType.Constructor, new[] { typeof(SaveMissionData) })]
+	internal static class PostalItemKindsMissionPatch
+	{
+		private static void Postfix(Mission __instance, SaveMissionData data)
+		{
+			PostalItemKinds.MissionLoaded(__instance, data);
+		}
+	}
+
+	// Before the game registers the item (NANDTweaks' mission decal is a postfix on that), so the decal sees a Registered Letter.
+	[HarmonyPatch(typeof(Mission), nameof(Mission.RegisterGood))]
+	internal static class PostalItemKindsGoodPatch
+	{
+		private static void Prefix(Mission __instance, GameObject good)
+		{
+			PostalItemKinds.GoodJoining(__instance, good);
+		}
+	}
+
+	// Express Mail and Registered Letters are kinds only for the mission log: both save as the game's mail, so the log tells them from
+	// mail by kind. Only the first three rename a mission elsewhere (its page, the delivery notice, the item's look text).
 	internal enum SpecialMailKind
 	{
 		None = 0,
 		AnonymousLetter = 1,
 		UrgentExpressMail = 2,
-		GoldenDelivery = 3
+		GoldenDelivery = 3,
+		ExpressMail = 4,
+		RegisteredLetter = 5
 	}
 
 	internal static class SpecialMailDisplay
@@ -1500,8 +2118,23 @@ namespace PostalExpansion
 			{
 				return SpecialMailKind.AnonymousLetter;
 			}
+			if (PostalMail.IsExpressMission(mission))
+			{
+				return SpecialMailKind.ExpressMail;
+			}
+			if (PostalMail.IsRegisteredLetter(PostalMail.SaveableOf(mission)))
+			{
+				return SpecialMailKind.RegisteredLetter;
+			}
 
 			return SpecialMailKind.None;
+		}
+
+		internal static bool Renames(SpecialMailKind kind)
+		{
+			return kind == SpecialMailKind.AnonymousLetter ||
+				kind == SpecialMailKind.UrgentExpressMail ||
+				kind == SpecialMailKind.GoldenDelivery;
 		}
 
 		internal static string GetDisplayName(SpecialMailKind kind)
@@ -1514,6 +2147,10 @@ namespace PostalExpansion
 					return "Urgent Express Mail";
 				case SpecialMailKind.GoldenDelivery:
 					return GoldenDeliveryMissions.DisplayName;
+				case SpecialMailKind.ExpressMail:
+					return PostalExpressMail.DisplayName;
+				case SpecialMailKind.RegisteredLetter:
+					return Letter.DisplayName;
 				default:
 					return string.Empty;
 			}
@@ -1554,7 +2191,7 @@ namespace PostalExpansion
 		private static void Prefix(ref string notification)
 		{
 			SpecialMailKind kind = SpecialMailDisplay.CurrentDeliveryKind;
-			if (kind == SpecialMailKind.None ||
+			if (!SpecialMailDisplay.Renames(kind) ||
 				string.IsNullOrEmpty(notification) ||
 				!notification.StartsWith("Delivered ", StringComparison.Ordinal))
 			{
@@ -1579,7 +2216,7 @@ namespace PostalExpansion
 		private static void Postfix(MissionDetailsUI __instance, Mission mission)
 		{
 			SpecialMailKind kind = SpecialMailDisplay.GetKind(mission);
-			if (kind == SpecialMailKind.None)
+			if (!SpecialMailDisplay.Renames(kind))
 			{
 				return;
 			}
@@ -1717,6 +2354,47 @@ namespace PostalExpansion
 			historyKinds = new ConditionalWeakTable<LoggedMission, Marker>();
 		}
 
+		// A save from 1.1.3 or older, its log rows of prefab 238 and 239 just turned to 221: the history's entries for them follow, and a
+		// row with no entry gets its kind (Express Mail or Registered Letter), so the log still tells it from mail.
+		internal static void MigrateLegacyRows(
+			Dictionary<string, string> modData,
+			LoggedMission[] rows,
+			Dictionary<int, SpecialMailKind> legacyRows)
+		{
+			var entries = new List<string>();
+			var marked = new HashSet<int>();
+			if (modData.TryGetValue(SaveKey, out string data))
+			{
+				foreach (string entry in data.Split(new[] { ';' }, StringSplitOptions.RemoveEmptyEntries))
+				{
+					string[] fields = entry.Split(',');
+					if (fields.Length == 4 &&
+						int.TryParse(fields[0], out int slot) &&
+						legacyRows.ContainsKey(slot))
+					{
+						fields[3] = PostalMail.RegularMailItemIndex.ToString();
+						marked.Add(slot);
+					}
+
+					entries.Add(string.Join(",", fields));
+				}
+			}
+
+			foreach (KeyValuePair<int, SpecialMailKind> row in legacyRows)
+			{
+				if (!marked.Contains(row.Key))
+				{
+					entries.Add(string.Join(",",
+						row.Key,
+						(int)row.Value,
+						rows[row.Key].day,
+						PostalMail.RegularMailItemIndex));
+				}
+			}
+
+			modData[SaveKey] = string.Join(";", entries);
+		}
+
 		internal static void Mark(LoggedMission mission, SpecialMailKind kind)
 		{
 			if (mission == null || kind == SpecialMailKind.None)
@@ -1840,11 +2518,12 @@ namespace PostalExpansion
 					continue;
 				}
 
+				// An Anonymous Letter's port is its reference port, which its mission page hides too.
 				__instance.texts[i].text =
 					"day " + mission.day + ": " +
-					SpecialMailDisplay.GetDisplayName(kind) + " to " +
-					mission.destinationName + " (" +
-					mission.deliveredGoodCount + ")";
+					SpecialMailDisplay.GetDisplayName(kind) +
+					(kind == SpecialMailKind.AnonymousLetter ? string.Empty : " to " + mission.destinationName) +
+					" (" + mission.deliveredGoodCount + ")";
 			}
 		}
 	}

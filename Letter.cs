@@ -99,7 +99,7 @@ namespace PostalExpansion
 		internal string LocationDescription { get; }
 		internal virtual float DistanceToOffice =>
 			new Vector2(LocalPosition.x, LocalPosition.z).magnitude;
-		internal virtual bool UsePersistentWorldAnchor => false;
+		internal virtual bool HangsUnderPort => false;
 		internal virtual bool UseDeliveryLocationForRoute => false;
 		internal virtual bool ShowDeliveryCoordinates => false;
 		internal virtual bool HideDestination => false;
@@ -459,7 +459,7 @@ namespace PostalExpansion
 				}
 
 				Mission mission = PlayerMissions.missions[slot];
-				if (IsLetterMission(mission) &&
+				if (PostalMail.IsRegisteredLetter(PostalMail.SaveableOf(mission)) &&
 					mission.missionIndex == slot &&
 					mission.originPort != null &&
 					mission.destinationPort != null &&
@@ -661,18 +661,6 @@ namespace PostalExpansion
 		private static string GetPortName(Port port)
 		{
 			return port != null ? port.GetPortName() : "unknown port";
-		}
-
-		private static bool IsLetterMission(Mission mission)
-		{
-			if (mission == null || mission.goodPrefab == null)
-			{
-				return false;
-			}
-
-			SaveablePrefab saveable =
-				mission.goodPrefab.GetComponent<SaveablePrefab>();
-			return PostalMail.IsRegisteredLetter(saveable);
 		}
 
 		private static Port GetPort(int portIndex)
@@ -970,7 +958,7 @@ namespace PostalExpansion
 			}
 
 			var root = new GameObject(rootName);
-			if (definition.UsePersistentWorldAnchor)
+			if (definition.HangsUnderPort)
 			{
 				root.transform.position =
 					portDude.transform.TransformPoint(definition.LocalPosition);
@@ -994,43 +982,17 @@ namespace PostalExpansion
 				portDude.GetPort(),
 				definition,
 				dialogueArea);
-
-			if (definition.UsePersistentWorldAnchor)
-			{
-				PersistentLetterDeliveryAnchor anchor =
-					root.AddComponent<PersistentLetterDeliveryAnchor>();
-				anchor.Initialize(
-					portDude.transform,
-					definition.LocalPosition,
-					definition.LocalEulerAngles);
-			}
 		}
 
+		// A spot away from its clerk hangs under the port object, the clerk's sibling on the same island: the island carries it as the
+		// game moves the island, and the island's far-object switch (IslandPerformanceSwitcher) never hides the port object.
 		private static Transform GetAreaParent(
 			PortDude portDude,
 			LetterMissionDefinition definition)
 		{
-			if (!definition.UsePersistentWorldAnchor)
-			{
-				return portDude.transform;
-			}
-
-			if (Refs.shiftingWorld != null)
-			{
-				return Refs.shiftingWorld;
-			}
-
-			FloatingOriginManager manager =
-				Object.FindObjectOfType<FloatingOriginManager>();
-			if (manager != null)
-			{
-				return manager.transform;
-			}
-
-			Debug.LogWarning(
-				"Postal Expansion: Cannot create persistent delivery area " +
-				definition.Id + "; shifting world is unavailable.");
-			return null;
+			return definition.HangsUnderPort
+				? portDude.GetPort().transform
+				: portDude.transform;
 		}
 
 		internal static bool TryGetAreaTransform(
@@ -1044,19 +1006,22 @@ namespace PostalExpansion
 			}
 
 			Transform parent = null;
-			if (definition.UsePersistentWorldAnchor)
-			{
-				parent = Refs.shiftingWorld;
-			}
-			else if (Port.ports != null &&
+			if (Port.ports != null &&
 				definition.DestinationPortIndex >= 0 &&
 				definition.DestinationPortIndex < Port.ports.Length)
 			{
 				Port destination = Port.ports[definition.DestinationPortIndex];
-				PortDude portDude = destination != null
-					? destination.GetDude()
-					: null;
-				parent = portDude != null ? portDude.transform : null;
+				if (definition.HangsUnderPort)
+				{
+					parent = destination != null ? destination.transform : null;
+				}
+				else
+				{
+					PortDude portDude = destination != null
+						? destination.GetDude()
+						: null;
+					parent = portDude != null ? portDude.transform : null;
+				}
 			}
 
 			areaTransform = parent != null
@@ -1816,13 +1781,13 @@ namespace PostalExpansion
 			return clone.GetComponent<TextMesh>();
 		}
 
-		private static TextMesh FindText(Transform root, string objectName)
+		internal static TextMesh FindText(Transform root, string objectName)
 		{
 			Transform child = root != null ? root.Find(objectName) : null;
 			return child != null ? child.GetComponent<TextMesh>() : null;
 		}
 
-		private static TextMesh FindTextByContent(Transform root, string content)
+		internal static TextMesh FindTextByContent(Transform root, string content)
 		{
 			return FindText(root, text => string.Equals(
 				text.Trim(),
@@ -2015,58 +1980,6 @@ namespace PostalExpansion
 		}
 	}
 
-	internal sealed class PersistentLetterDeliveryAnchor : MonoBehaviour
-	{
-		private Transform source;
-		private Vector3 sourceLocalPosition;
-		private Quaternion sourceLocalRotation;
-		private Rigidbody[] triggerBodies;
-
-		internal void Initialize(
-			Transform sourceTransform,
-			Vector3 localPosition,
-			Vector3 localEulerAngles)
-		{
-			source = sourceTransform;
-			sourceLocalPosition = localPosition;
-			sourceLocalRotation = Quaternion.Euler(localEulerAngles);
-			triggerBodies = GetComponentsInChildren<Rigidbody>();
-			ApplyPose();
-		}
-
-		private void FixedUpdate()
-		{
-			ApplyPose();
-		}
-
-		private void ApplyPose()
-		{
-			if (source == null)
-			{
-				return;
-			}
-
-			Vector3 position = source.TransformPoint(sourceLocalPosition);
-			Quaternion rotation = source.rotation * sourceLocalRotation;
-			transform.position = position;
-			transform.rotation = rotation;
-
-			if (triggerBodies == null)
-			{
-				return;
-			}
-
-			foreach (Rigidbody body in triggerBodies)
-			{
-				if (body != null)
-				{
-					body.position = position;
-					body.rotation = rotation;
-				}
-			}
-		}
-	}
-
 	internal static class VanillaQuestState
 	{
 		private const int HideoutQuestIndex = 0;
@@ -2084,10 +1997,9 @@ namespace PostalExpansion
 
 	internal static class Letter
 	{
-		internal const int LetterGoodIndex = 68;
+		internal const string DisplayName = "Registered Letter";
 
 		private const int QuestLetterItemIndex = 330;
-		private const string LetterName = "Registered Letter";
 		private const string InheritedLabelObjectName = "label";
 		private const string LetterSealTextureFile = "registered_letter_seal.png";
 		private const string LetterSealObjectName = "postal_expansion_registered_letter_seal";
@@ -2103,82 +2015,40 @@ namespace PostalExpansion
 
 		internal static GameObject Prefab => letterPrefab;
 
-		internal static bool EnsureRegistered(PrefabsDirectory directory)
+		// The item template: a copy of the game's mail kept off its prefab list, so it saves as mail, with the quest letter's look.
+		internal static bool EnsureTemplate()
 		{
-			if (directory == null || directory.directory == null)
-			{
-				return false;
-			}
-
-			if (PostalPrefabRegistration.IsRegistered(
-				directory,
-				PostalMail.RegisteredLetterItemIndex,
-				letterPrefab))
+			if (letterPrefab != null)
 			{
 				return true;
 			}
 
-			if (!HasPrefab(directory, PostalMail.RegularMailItemIndex))
+			GameObject regularMailPrefab = PostalPrefabRegistration.GetRegularMail();
+			GameObject questLetterPrefab = GetQuestLetter();
+			if (regularMailPrefab == null ||
+				questLetterPrefab == null ||
+				!HasRequiredComponents(regularMailPrefab, questLetterPrefab))
 			{
-				Debug.LogWarning("Postal Expansion: regular mail prefab 221 was not found.");
+				Debug.LogWarning("Postal Expansion: mail prefab 221 or quest letter prefab 330 was not found; no Registered Letters.");
 				return false;
 			}
 
-			if (!HasPrefab(directory, QuestLetterItemIndex))
-			{
-				Debug.LogWarning("Postal Expansion: vanilla quest letter prefab 330 was not found.");
-				return false;
-			}
-
-			if (PostalPrefabRegistration.IsSlotOccupiedByAnotherPrefab(
-				directory,
-				PostalMail.RegisteredLetterItemIndex,
-				letterPrefab))
-			{
-				Debug.LogError("Postal Expansion: prefab index 238 is already occupied.");
-				return false;
-			}
-
-			GameObject regularMailPrefab =
-				directory.directory[PostalMail.RegularMailItemIndex];
-			GameObject questLetterPrefab = directory.directory[QuestLetterItemIndex];
-			if (!HasRequiredComponents(regularMailPrefab, questLetterPrefab) ||
-				!PostalPrefabRegistration.EnsureCapacity(
-					directory,
-					PostalMail.RegisteredLetterItemIndex))
-			{
-				Debug.LogError(
-					"Postal Expansion: Registered Letter prefab components could not be prepared.");
-				return false;
-			}
-
-			if (letterPrefab == null)
-			{
-				letterPrefab = Object.Instantiate(regularMailPrefab);
-				letterPrefab.name =
-					$"{PostalMail.RegisteredLetterItemIndex} ({LetterGoodIndex}) {LetterName}";
-				Object.DontDestroyOnLoad(letterPrefab);
-			}
-
-			PostalMailOutlineSanitizer.Attach(letterPrefab);
-			ConfigurePrefab(letterPrefab, questLetterPrefab);
-			if (!PostalPrefabRegistration.RegisterShipItem(
-				directory,
-				PostalMail.RegisteredLetterItemIndex,
-				letterPrefab))
-			{
-				Debug.LogError(
-					"Postal Expansion: Registered Letter prefab could not be registered as a ship item.");
-				return false;
-			}
-
-			directory.directory[PostalMail.RegisteredLetterItemIndex] = letterPrefab;
+			letterPrefab = PostalPrefabRegistration.CreateTemplate(
+				regularMailPrefab,
+				"postal_expansion_registered_letter");
+			letterPrefab.SetActive(true);
+			Configure(letterPrefab);
 			return true;
 		}
 
-		private static bool HasPrefab(PrefabsDirectory directory, int prefabIndex)
+		private static GameObject GetQuestLetter()
 		{
-			return directory.directory.Length > prefabIndex && directory.directory[prefabIndex] != null;
+			GameObject[] directory = PrefabsDirectory.instance != null
+				? PrefabsDirectory.instance.directory
+				: null;
+			return directory != null && directory.Length > QuestLetterItemIndex
+				? directory[QuestLetterItemIndex]
+				: null;
 		}
 
 		private static bool HasRequiredComponents(
@@ -2197,17 +2067,18 @@ namespace PostalExpansion
 				questLetterPrefab.GetComponent<BoxCollider>() != null;
 		}
 
-		private static void ConfigurePrefab(GameObject prefab, GameObject questLetterPrefab)
+		// Turns a copy of the game's mail into a Registered Letter: the template, or a mail item loaded from a save for a letter mission.
+		internal static void Configure(GameObject prefab)
 		{
-			prefab.SetActive(true);
-			prefab.name =
-				$"{PostalMail.RegisteredLetterItemIndex} ({LetterGoodIndex}) {LetterName}";
-			prefab.GetComponent<SaveablePrefab>().prefabIndex =
-				PostalMail.RegisteredLetterItemIndex;
+			GameObject questLetterPrefab = GetQuestLetter();
+			if (questLetterPrefab == null)
+			{
+				return;
+			}
 
 			ShipItem targetItem = prefab.GetComponent<ShipItem>();
 			ShipItem sourceItem = questLetterPrefab.GetComponent<ShipItem>();
-			targetItem.name = LetterName;
+			targetItem.name = DisplayName;
 			targetItem.mass = 1f;
 			targetItem.big = sourceItem.big;
 			targetItem.holdDistance = sourceItem.holdDistance;
@@ -2230,16 +2101,20 @@ namespace PostalExpansion
 			targetCollider.center = sourceCollider.center;
 			targetCollider.size = sourceCollider.size;
 
+			// At once, so a distance group built right after leaves it out.
 			Transform inheritedLabel = prefab.transform.Find(InheritedLabelObjectName);
 			if (inheritedLabel != null)
 			{
-				inheritedLabel.gameObject.SetActive(false);
-				Object.Destroy(inheritedLabel.gameObject);
+				Object.DestroyImmediate(inheritedLabel.gameObject);
 			}
 
 			Vector3 sealPosition = targetCollider.center;
 			sealPosition.z += targetCollider.size.z / 2f + LetterSealSurfaceOffset;
 			LetterSeal.Ensure(prefab, sealPosition, Quaternion.identity);
+			if (prefab.GetComponent<RegisteredLetterItem>() == null)
+			{
+				prefab.AddComponent<RegisteredLetterItem>();
+			}
 		}
 	}
 
@@ -2447,16 +2322,18 @@ namespace PostalExpansion
 	// method records each mission good in a port's warehouse area, and its Deliver button calls
 	// Good.Deliver on them. Registered and Anonymous Letters are delivered only at their own spots, so
 	// they are taken back out of its record; it then shows a letter mission as having no goods there.
+	// Its record: one list "portList" since 1.0.4, a list per port "portLists" in 1.0.3.
 	[HarmonyPatch(typeof(IslandMarketWarehouseArea), "OnTriggerEnter")]
 	internal static class MissionReworkLetterExclusionPatch
 	{
 		internal const string MissionReworkGuid = "com.nandbrew.missionrework";
 
-		private const string PortListsTypeName = "MissionRework.MissionPatches";
-		private const string PortListsFieldName = "portLists";
+		private const string RecordTypeName = "MissionRework.MissionPatches";
+		private const string RecordFieldName = "portList";
+		private const string PerPortRecordFieldName = "portLists";
 
 		private static bool lookedUp;
-		private static FieldInfo portListsField;
+		private static FieldInfo recordField;
 
 		[HarmonyAfter(MissionReworkGuid)]
 		private static void Postfix(Collider other, IslandMarket ___market)
@@ -2464,32 +2341,41 @@ namespace PostalExpansion
 			Good good = other != null ? other.GetComponent<Good>() : null;
 			if (good == null ||
 				___market == null ||
-				!PostalMail.IsRegisteredLetter(good.GetComponent<SaveablePrefab>()) ||
-				!(GetPortLists() is Dictionary<int, List<Good>> portLists))
+				!PostalMail.IsRegisteredLetter(good.GetComponent<SaveablePrefab>()))
 			{
 				return;
 			}
 
-			if (portLists.TryGetValue(___market.GetPortIndex(), out List<Good> goods))
+			object record = GetRecord();
+			if (record is List<Good> goods)
 			{
 				goods.Remove(good);
+			}
+			else if (record is Dictionary<int, List<Good>> perPort &&
+				perPort.TryGetValue(___market.GetPortIndex(), out List<Good> portGoods))
+			{
+				portGoods.Remove(good);
 			}
 		}
 
 		// Looked up once, and only with Mission Rework loaded (AccessTools.TypeByName logs a HarmonyX
-		// warning for a missing type).
-		private static object GetPortLists()
+		// warning for a missing type). The value is read each time: Mission Rework creates its list late.
+		private static object GetRecord()
 		{
 			if (!lookedUp)
 			{
 				lookedUp = true;
 				if (BepInEx.Bootstrap.Chainloader.PluginInfos.ContainsKey(MissionReworkGuid))
 				{
-					Type type = AccessTools.TypeByName(PortListsTypeName);
-					portListsField = type != null
-						? AccessTools.Field(type, PortListsFieldName)
-						: null;
-					if (portListsField == null)
+					Type type = AccessTools.TypeByName(RecordTypeName);
+					// Plain reflection: AccessTools.Field also logs a warning for a missing field.
+					const BindingFlags staticField =
+						BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic;
+					recordField = type == null
+						? null
+						: type.GetField(RecordFieldName, staticField) ??
+							type.GetField(PerPortRecordFieldName, staticField);
+					if (recordField == null)
 					{
 						Debug.LogWarning(
 							"Postal Expansion: Mission Rework's warehouse goods list was not found; " +
@@ -2498,7 +2384,7 @@ namespace PostalExpansion
 				}
 			}
 
-			return portListsField?.GetValue(null);
+			return recordField?.GetValue(null);
 		}
 	}
 
@@ -2516,7 +2402,7 @@ namespace PostalExpansion
 			new LetterMissionSaveKeys(
 				"PostalExpansion.AnonymousLetter.Active.v1",
 				"PostalExpansion.AnonymousLetter.Claimed.v1");
-		// Pirate Hideout used Registered Letter persistence before version 0.5.13.
+		// Saves from before 0.5.13 hold Pirate Hideout under the Registered Letter keys.
 		private static readonly LetterMissionSaveKeys LegacyPirateHideoutSaveKeys =
 			new LetterMissionSaveKeys(
 				"PostalExpansion.RegisteredLetter.Active.v1",
@@ -2614,7 +2500,7 @@ namespace PostalExpansion
 		}
 
 		internal sealed override float DistanceToOffice { get; }
-		internal sealed override bool UsePersistentWorldAnchor => true;
+		internal sealed override bool HangsUnderPort => true;
 		internal sealed override bool UseDeliveryLocationForRoute => true;
 		internal sealed override bool ShowDeliveryCoordinates => true;
 		internal sealed override bool HideDestination => true;

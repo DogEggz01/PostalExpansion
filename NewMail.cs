@@ -4,39 +4,31 @@ using System.Reflection;
 using System.Runtime.CompilerServices;
 using HarmonyLib;
 using UnityEngine;
-using Object = UnityEngine.Object;
 using Random = System.Random;
 
 namespace PostalExpansion
 {
 	internal static class PostalMail
 	{
+		// Express Mail and Registered Letters are copies of the game's mail and save under its prefab number; a marker component tells
+		// them apart. Up to 1.1.3 they had prefab numbers of their own, 239 and 238, which old saves still hold.
 		internal const int RegularMailItemIndex = 221;
-		internal const int RegisteredLetterItemIndex = 238;
-		internal const int ExpressMailItemIndex = 239;
+		internal const int LegacyRegisteredLetterItemIndex = 238;
+		internal const int LegacyExpressMailItemIndex = 239;
 
 		internal static bool IsMailPrefab(SaveablePrefab saveable)
 		{
-			return saveable != null &&
-				(saveable.prefabIndex == RegularMailItemIndex ||
-				IsRegisteredLetter(saveable) ||
-				IsExpressMail(saveable));
+			return saveable != null && saveable.prefabIndex == RegularMailItemIndex;
 		}
 
 		internal static bool IsRegisteredLetter(SaveablePrefab saveable)
 		{
-			return IsOwnedPrefab(
-				saveable,
-				RegisteredLetterItemIndex,
-				Letter.Prefab);
+			return saveable != null && saveable.GetComponent<RegisteredLetterItem>() != null;
 		}
 
 		internal static bool IsExpressMail(SaveablePrefab saveable)
 		{
-			return IsOwnedPrefab(
-				saveable,
-				ExpressMailItemIndex,
-				PostalExpressMail.Prefab);
+			return saveable != null && saveable.GetComponent<ExpressMailItem>() != null;
 		}
 
 		internal static bool IsWithinVanillaReputationRange(Port origin, float distance)
@@ -45,18 +37,50 @@ namespace PostalExpansion
 				distance <= PlayerReputation.GetMaxDistance(origin.region);
 		}
 
-		private static bool IsOwnedPrefab(
-			SaveablePrefab saveable,
-			int prefabIndex,
-			GameObject expectedPrefab)
+		internal static SaveablePrefab SaveableOf(Mission mission)
 		{
-			return saveable != null &&
-				saveable.prefabIndex == prefabIndex &&
-				PostalPrefabRegistration.IsRegistered(
-					PrefabsDirectory.instance,
-					prefabIndex,
-					expectedPrefab);
+			return mission != null && mission.goodPrefab != null
+				? mission.goodPrefab.GetComponent<SaveablePrefab>()
+				: null;
 		}
+
+		internal static bool IsExpressMission(Mission mission)
+		{
+			return IsExpressMail(SaveableOf(mission));
+		}
+
+		internal static bool PlayerHasMission(
+			Port origin,
+			Port destination,
+			GameObject goodPrefab)
+		{
+			Mission[] missions = PlayerMissions.missions;
+			if (missions == null)
+			{
+				return false;
+			}
+
+			foreach (Mission mission in missions)
+			{
+				if (mission != null &&
+					mission.originPort == origin &&
+					mission.destinationPort == destination &&
+					mission.goodPrefab == goodPrefab)
+				{
+					return true;
+				}
+			}
+
+			return false;
+		}
+	}
+
+	internal sealed class ExpressMailItem : MonoBehaviour
+	{
+	}
+
+	internal sealed class RegisteredLetterItem : MonoBehaviour
+	{
 	}
 
 	internal static class MailDueDateCalculator
@@ -176,7 +200,7 @@ namespace PostalExpansion
 			Good mailGood = mail != null ? mail.GetComponent<Good>() : null;
 			if (mailGood == null ||
 				!PostalMail.IsWithinVanillaReputationRange(origin, distance) ||
-				PlayerAlreadyHasMission(origin, bottleneck, mail.gameObject))
+				PostalMail.PlayerHasMission(origin, bottleneck, mail.gameObject))
 			{
 				return;
 			}
@@ -226,41 +250,16 @@ namespace PostalExpansion
 
 			return false;
 		}
-
-		private static bool PlayerAlreadyHasMission(
-			Port origin,
-			Port destination,
-			UnityEngine.GameObject goodPrefab)
-		{
-			if (PlayerMissions.missions == null)
-			{
-				return false;
-			}
-
-			foreach (Mission mission in PlayerMissions.missions)
-			{
-				if (mission != null &&
-					mission.originPort == origin &&
-					mission.destinationPort == destination &&
-					mission.goodPrefab == goodPrefab)
-				{
-					return true;
-				}
-			}
-
-			return false;
-		}
 	}
 
 	internal static class PostalExpressMail
 	{
-		private const int ExpressMailGoodIndex = 69;
 		private const float ExpressWorldDistance = 140f;
 		private const float ExpressMailDueDayBaseSpeed = 2.6f;
 		private const float ExpressRewardMultiplier = 1.5f;
 		private const float HardPortRewardMultiplier = 2f;
 		private const float ComparableRegularMailPackageMultiplier = 2f;
-		private const string ExpressMailName = "Express Mail";
+		internal const string DisplayName = "Express Mail";
 		private const string ExpressMailSealTextureFile = "express_mail_seal.png";
 		private const string ExpressMailSealObjectName = "postal_expansion_express_mail_seal";
 		private const float ExpressMailSealSize = 0.32f;
@@ -317,82 +316,46 @@ namespace PostalExpansion
 
 		internal static GameObject Prefab => expressMailPrefab;
 
-		internal static bool EnsureRegistered(PrefabsDirectory directory)
+		// The item template: a copy of the game's mail kept off its prefab list, so it saves as mail.
+		internal static bool EnsureTemplate()
 		{
-			if (directory == null || directory.directory == null)
-			{
-				return false;
-			}
-
-			if (PostalPrefabRegistration.IsRegistered(
-				directory,
-				PostalMail.ExpressMailItemIndex,
-				expressMailPrefab))
+			if (expressMailPrefab != null)
 			{
 				return true;
 			}
 
-			if (PostalPrefabRegistration.IsSlotOccupiedByAnotherPrefab(
-				directory,
-				PostalMail.ExpressMailItemIndex,
-				expressMailPrefab))
+			GameObject regularMailPrefab = PostalPrefabRegistration.GetRegularMail();
+			if (regularMailPrefab == null || !HasRequiredComponents(regularMailPrefab))
 			{
-				Debug.LogError("Postal Expansion: prefab index 239 is already occupied.");
+				Debug.LogWarning("Postal Expansion: regular mail prefab 221 was not found.");
 				return false;
 			}
 
-			if (directory.directory.Length <= PostalMail.RegularMailItemIndex ||
-				directory.directory[PostalMail.RegularMailItemIndex] == null)
-			{
-				Debug.LogWarning("Postal Expansion: regular mail prefab was not found.");
-				return false;
-			}
-
-			GameObject regularMailPrefab =
-				directory.directory[PostalMail.RegularMailItemIndex];
-			if (!HasRequiredComponents(regularMailPrefab) ||
-				!PostalPrefabRegistration.EnsureCapacity(
-					directory,
-					PostalMail.ExpressMailItemIndex))
-			{
-				Debug.LogError("Postal Expansion: Express Mail prefab components could not be prepared.");
-				return false;
-			}
-
-			if (expressMailPrefab == null)
-			{
-				expressMailPrefab = Object.Instantiate(regularMailPrefab);
-				expressMailPrefab.name =
-					$"{PostalMail.ExpressMailItemIndex} ({ExpressMailGoodIndex}) {ExpressMailName}";
-				Object.DontDestroyOnLoad(expressMailPrefab);
-			}
-
-			PostalMailOutlineSanitizer.Attach(expressMailPrefab);
-			ConfigureExpressMailPrefab(expressMailPrefab);
-			EnsureExpressMailSeal(expressMailPrefab);
-			if (!PostalPrefabRegistration.RegisterShipItem(
-				directory,
-				PostalMail.ExpressMailItemIndex,
-				expressMailPrefab))
-			{
-				Debug.LogError("Postal Expansion: Express Mail prefab could not be registered as a ship item.");
-				return false;
-			}
-
-			directory.directory[PostalMail.ExpressMailItemIndex] = expressMailPrefab;
+			expressMailPrefab = PostalPrefabRegistration.CreateTemplate(
+				regularMailPrefab,
+				"postal_expansion_express_mail");
+			expressMailPrefab.SetActive(true);
+			Configure(expressMailPrefab);
 			return true;
+		}
+
+		// Turns a copy of the game's mail into Express Mail: the template, or a mail item loaded from a save for an Express mission.
+		internal static void Configure(GameObject item)
+		{
+			item.GetComponent<ShipItem>().name = DisplayName;
+			item.GetComponent<Good>().requiredRepLevel = 3;
+			ExpressMailSeal.Ensure(item, ExpressMailSealLocalPosition, Quaternion.identity);
+			if (item.GetComponent<ExpressMailItem>() == null)
+			{
+				item.AddComponent<ExpressMailItem>();
+			}
 		}
 
 		internal static void AddExpressMissions(Port origin, List<Mission> missions)
 		{
-			PrefabsDirectory directory = PrefabsDirectory.instance;
 			if (origin == null ||
 				missions == null ||
-				(!PostalPrefabRegistration.IsRegistered(
-					directory,
-					PostalMail.ExpressMailItemIndex,
-					expressMailPrefab) &&
-				 !EnsureRegistered(directory)) ||
+				!EnsureTemplate() ||
 				Port.ports == null ||
 				!ExpressMailAvailablePortIndices.Contains(origin.portIndex))
 			{
@@ -472,6 +435,10 @@ namespace PostalExpansion
 				}
 			}
 
+			// The day's draw is made from every destination, so it is the same before and after an accept; the destinations the player
+			// already holds an Express from this port to are left out afterwards.
+			generatedMissions.RemoveAll(mission =>
+				PostalMail.PlayerHasMission(origin, mission.destinationPort, expressMailPrefab));
 			missions.AddRange(generatedMissions);
 		}
 
@@ -487,15 +454,6 @@ namespace PostalExpansion
 			return prefab.GetComponent<SaveablePrefab>() != null &&
 				prefab.GetComponent<ShipItem>() != null &&
 				prefab.GetComponent<Good>() != null;
-		}
-
-		private static void ConfigureExpressMailPrefab(GameObject prefab)
-		{
-			prefab.SetActive(true);
-			prefab.GetComponent<SaveablePrefab>().prefabIndex =
-				PostalMail.ExpressMailItemIndex;
-			prefab.GetComponent<ShipItem>().name = ExpressMailName;
-			prefab.GetComponent<Good>().requiredRepLevel = 3;
 		}
 
 		private static bool IsHardPort(Port port)
@@ -543,8 +501,7 @@ namespace PostalExpansion
 				}
 
 				bool hardPort = IsHardPort(destination);
-				if ((!hardPort || reputationLevel >= 4) &&
-					!PlayerAlreadyHasMission(origin, destination, expressMailPrefab))
+				if (!hardPort || reputationLevel >= 4)
 				{
 					candidates.Add(
 						new ExpressMissionDestinationCandidate(destination, distance, hardPort));
@@ -660,36 +617,6 @@ namespace PostalExpansion
 				ExpressMailDueDayBaseSpeed);
 		}
 
-		private static bool PlayerAlreadyHasMission(
-			Port origin,
-			Port destination,
-			GameObject goodPrefab)
-		{
-			Mission[] missions = PlayerMissions.missions;
-			if (missions == null)
-			{
-				return false;
-			}
-
-			foreach (Mission mission in missions)
-			{
-				if (mission != null &&
-					mission.originPort == origin &&
-					mission.destinationPort == destination &&
-					mission.goodPrefab == goodPrefab)
-				{
-					return true;
-				}
-			}
-
-			return false;
-		}
-
-		private static void EnsureExpressMailSeal(GameObject prefab)
-		{
-			ExpressMailSeal.Ensure(prefab, ExpressMailSealLocalPosition, Quaternion.identity);
-		}
-
 		private readonly struct ExpressMissionDestinationCandidate
 		{
 			internal ExpressMissionDestinationCandidate(
@@ -738,7 +665,7 @@ namespace PostalExpansion
 
 		internal static void MarkGenerated(Mission mission)
 		{
-			if (!IsExpressMission(mission) || IsUrgent(mission))
+			if (!PostalMail.IsExpressMission(mission) || IsUrgent(mission))
 			{
 				return;
 			}
@@ -797,17 +724,6 @@ namespace PostalExpansion
 			}
 		}
 
-		private static bool IsExpressMission(Mission mission)
-		{
-			if (mission == null || mission.goodPrefab == null)
-			{
-				return false;
-			}
-
-			SaveablePrefab saveable = mission.goodPrefab.GetComponent<SaveablePrefab>();
-			return PostalMail.IsExpressMail(saveable);
-		}
-
 		private static string SerializeActiveMission(int slot, Mission mission)
 		{
 			return string.Join(",",
@@ -823,7 +739,7 @@ namespace PostalExpansion
 			return fields.Length == 3 &&
 				int.TryParse(fields[1], out int originIndex) &&
 				int.TryParse(fields[2], out int destinationIndex) &&
-				IsExpressMission(mission) &&
+				PostalMail.IsExpressMission(mission) &&
 				mission.originPort.portIndex == originIndex &&
 				mission.destinationPort.portIndex == destinationIndex;
 		}
@@ -866,8 +782,7 @@ namespace PostalExpansion
 				return;
 			}
 
-			PrefabsDirectory directory = PrefabsDirectory.instance;
-			if (!PostalExpressMail.EnsureRegistered(directory))
+			if (!PostalExpressMail.EnsureTemplate())
 			{
 				return;
 			}
@@ -998,17 +913,6 @@ namespace PostalExpansion
 				DisplayName + " to " + mission.destinationPort.GetPortName();
 		}
 
-		private static bool IsExpressMission(Mission mission)
-		{
-			if (mission == null || mission.goodPrefab == null)
-			{
-				return false;
-			}
-
-			return PostalMail.IsExpressMail(
-				mission.goodPrefab.GetComponent<SaveablePrefab>());
-		}
-
 		private static bool PlayerAlreadyHasGoldenMission(
 			Port origin,
 			Port destination)
@@ -1056,7 +960,7 @@ namespace PostalExpansion
 				int.TryParse(fields[2], out int destinationIndex) &&
 				int.TryParse(fields[3], out int dueDay) &&
 				int.TryParse(fields[4], out int totalPrice) &&
-				IsExpressMission(mission) &&
+				PostalMail.IsExpressMission(mission) &&
 				mission.goodCount == 1 &&
 				mission.originPort.portIndex == originIndex &&
 				mission.destinationPort.portIndex == destinationIndex &&
