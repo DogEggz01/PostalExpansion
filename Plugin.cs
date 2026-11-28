@@ -14,11 +14,12 @@ namespace PostalExpansion
 {
 	[BepInPlugin(PluginGuid, PluginName, PluginVersion)]
 	[BepInDependency(NandTweaksCompatibility.PluginGuid, BepInDependency.DependencyFlags.SoftDependency)]
+	[BepInDependency(ModdedPortMail.TamarackGuid, BepInDependency.DependencyFlags.SoftDependency)]
 	public class Plugin : BaseUnityPlugin
 	{
 		internal const string PluginGuid = "com.DogEggz.postalexpansion";
 		internal const string PluginName = "Postal Expansion";
-		internal const string PluginVersion = "1.1.4";
+		internal const string PluginVersion = "1.1.5";
 
 		private const float DefaultRegularMailRewardMultiplier = 2f;
 		private const float DefaultRegularMailReputationMultiplier = 4.5f;
@@ -49,6 +50,8 @@ namespace PostalExpansion
 		private void Awake()
 		{
 			BindConfiguration();
+			ModdedPortMail.TamarackLoaded =
+				BepInEx.Bootstrap.Chainloader.PluginInfos.ContainsKey(ModdedPortMail.TamarackGuid);
 			harmony = new Harmony(PluginGuid);
 			harmony.PatchAll(Assembly.GetExecutingAssembly());
 			NandTweaksCompatibility.Apply(harmony);
@@ -555,8 +558,11 @@ namespace PostalExpansion
 			new Color(1f, 0.45f, 0.08f, 1f);
 		private static readonly Color GoldenMissionColor =
 			new Color(1f, 0.72f, 0.12f, 1f);
-		private static readonly MaterialPropertyBlock MissionHighlightProperties =
-			new MaterialPropertyBlock();
+		// Each mission button's material as the game set it. A highlighted button is coloured on its own copy (renderer.material),
+		// not by a property block: the game's outline draws the looked-at button with the renderer's property block, whose _Color
+		// would replace the outline's colour.
+		private static readonly Dictionary<Renderer, Material> MissionButtonBaseMaterials =
+			new Dictionary<Renderer, Material>();
 
 		private static readonly FieldInfo LocalButtonField =
 			AccessTools.Field(typeof(MissionListUI), "localButton");
@@ -814,10 +820,20 @@ namespace PostalExpansion
 				}
 
 				Renderer renderer = button.GetComponent<Renderer>();
-				Material material = renderer != null ? renderer.sharedMaterial : null;
-				if (material == null)
+				if (renderer == null)
 				{
 					continue;
+				}
+
+				Material baseMaterial;
+				if (!MissionButtonBaseMaterials.TryGetValue(renderer, out baseMaterial))
+				{
+					baseMaterial = renderer.sharedMaterial;
+					if (baseMaterial == null)
+					{
+						continue;
+					}
+					MissionButtonBaseMaterials[renderer] = baseMaterial;
 				}
 
 				bool active = button.gameObject.activeSelf;
@@ -826,22 +842,28 @@ namespace PostalExpansion
 				bool urgent = active &&
 					UrgentExpressMail.IsUrgent(button.mission);
 				bool highlighted = golden || urgent;
+				if (!highlighted && renderer.sharedMaterial == baseMaterial)
+				{
+					continue;
+				}
+
 				Color highlightColor = golden
 					? GoldenMissionColor
 					: UrgentMissionColor;
-				MissionHighlightProperties.Clear();
-				renderer.GetPropertyBlock(MissionHighlightProperties);
+				// The renderer's own copy, made on first use and kept.
+				Material material = renderer.material;
 				SetMissionMaterialColor(
 					material,
+					baseMaterial,
 					"_Color",
 					highlighted,
 					highlightColor);
 				SetMissionMaterialColor(
 					material,
+					baseMaterial,
 					"_BaseColor",
 					highlighted,
 					highlightColor);
-				renderer.SetPropertyBlock(MissionHighlightProperties);
 			}
 		}
 
@@ -893,7 +915,7 @@ namespace PostalExpansion
 				AddFilteredVanillaMissions(port, true, tab, missions);
 				PostalExpressMail.AddExpressMissions(port, missions);
 				GoldenDeliveryMissions.AddMission(port, missions);
-				BottleneckMail.AddMissions(port, missions);
+				ModdedPortMail.AddMissions(port, missions);
 				RegisteredLetterMissions.AddMissions(port, missions);
 				AnonymousLetterMissions.AddMissions(port, missions);
 			}
@@ -1079,23 +1101,24 @@ namespace PostalExpansion
 
 		private static void SetMissionMaterialColor(
 			Material material,
+			Material baseMaterial,
 			string propertyName,
 			bool highlighted,
 			Color highlightColor)
 		{
-			if (!material.HasProperty(propertyName))
+			if (!baseMaterial.HasProperty(propertyName))
 			{
 				return;
 			}
 
-			Color color = material.GetColor(propertyName);
+			Color color = baseMaterial.GetColor(propertyName);
 			if (highlighted)
 			{
 				color.r = highlightColor.r;
 				color.g = highlightColor.g;
 				color.b = highlightColor.b;
 			}
-			MissionHighlightProperties.SetColor(propertyName, color);
+			material.SetColor(propertyName, color);
 		}
 
 		private static bool HasMissionListPagingReflection()
@@ -2065,7 +2088,37 @@ namespace PostalExpansion
 	{
 		private static void Prefix(SaveContainer save)
 		{
+			MissingPortMissions.Drop(save);
 			PostalItemKinds.BeforeLoad(save);
+		}
+	}
+
+	internal static class MissingPortMissions
+	{
+		internal static void Drop(SaveContainer save)
+		{
+			if (save == null || save.savedMissions == null || Port.ports == null)
+			{
+				return;
+			}
+
+			for (int i = 0; i < save.savedMissions.Length; i++)
+			{
+				SaveMissionData mission = save.savedMissions[i];
+				if (mission != null &&
+					(!PortExists(mission.originPort) || !PortExists(mission.destinationPort)))
+				{
+					Debug.LogWarning(
+						"Postal Expansion: the mission in slot " + i + ", from port " + mission.originPort +
+						" to port " + mission.destinationPort + ", is dropped: its port is not in the game.");
+					save.savedMissions[i] = null;
+				}
+			}
+		}
+
+		private static bool PortExists(int index)
+		{
+			return index >= 0 && index < Port.ports.Length && Port.ports[index] != null;
 		}
 	}
 

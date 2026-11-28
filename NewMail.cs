@@ -149,41 +149,50 @@ namespace PostalExpansion
 		}
 	}
 
-	// Better Ports adds Bottleneck Island (port 67) with its own destination list, but puts it in no
-	// other port's list, so the game never offers mail to it. Each port on Bottleneck's own list offers
-	// regular mail back to it in the Mail tab: made by the game's mail generator (so this mod's regular
-	// mail rules apply), under the game's own conditions for a mail mission.
-	internal static class BottleneckMail
+	internal static class ModdedPortMail
 	{
 		private const string BottleneckObjectName = "port 67 Bottleneck";
+		internal const string TamarackGuid = "com.dixiecapt.sailwind.martellotower";
+		private const string TamarackPortName = "Tamarack";
 		private const int RegularMailGoodIndex = 51;
 
 		private static readonly MethodInfo GenerateMailMissionMethod =
 			AccessTools.Method(typeof(IslandMissionOffice), "GenerateMailMission");
 
+		internal static bool TamarackLoaded;
+		private static int tamarackIndex = -1;
+
 		internal static void AddMissions(Port origin, List<Mission> missions)
 		{
-			Port bottleneck = GetBottleneck();
 			if (origin == null ||
 				missions == null ||
-				bottleneck == null ||
-				origin == bottleneck ||
-				GenerateMailMissionMethod == null ||
+				GenerateMailMissionMethod == null)
+			{
+				return;
+			}
+
+			AddBottleneckMission(origin, missions);
+			Port tamarack = GetTamarack();
+			if (!Contains(origin.GetDestinationPorts(), tamarack))
+			{
+				AddMission(origin, tamarack, missions);
+			}
+		}
+
+		private static void AddBottleneckMission(Port origin, List<Mission> missions)
+		{
+			Port bottleneck = GetBottleneck();
+			if (bottleneck == null ||
 				!Contains(bottleneck.GetDestinationPorts(), origin) ||
 				Contains(origin.GetDestinationPorts(), bottleneck))
 			{
 				return;
 			}
 
-			var office = origin.GetComponent<IslandMissionOffice>();
 			var market = origin.GetComponent<IslandMarket>();
-			PrefabsDirectory directory = PrefabsDirectory.instance;
-			if (office == null ||
-				market == null ||
+			if (market == null ||
 				market.knownPrices == null ||
-				bottleneck.portIndex >= market.knownPrices.Length ||
-				directory == null ||
-				CurrencyMarket.instance == null)
+				bottleneck.portIndex >= market.knownPrices.Length)
 			{
 				return;
 			}
@@ -195,26 +204,42 @@ namespace PostalExpansion
 				return;
 			}
 
-			float distance = Mission.GetDistance(origin, bottleneck);
+			AddMission(origin, bottleneck, missions);
+		}
+
+		private static void AddMission(Port origin, Port destination, List<Mission> missions)
+		{
+			var office = origin.GetComponent<IslandMissionOffice>();
+			PrefabsDirectory directory = PrefabsDirectory.instance;
+			if (destination == null ||
+				destination == origin ||
+				office == null ||
+				directory == null ||
+				CurrencyMarket.instance == null)
+			{
+				return;
+			}
+
+			float distance = Mission.GetDistance(origin, destination);
 			ShipItem mail = directory.GetGood(RegularMailGoodIndex);
 			Good mailGood = mail != null ? mail.GetComponent<Good>() : null;
 			if (mailGood == null ||
 				!PostalMail.IsWithinVanillaReputationRange(origin, distance) ||
-				PostalMail.PlayerHasMission(origin, bottleneck, mail.gameObject))
+				PostalMail.PlayerHasMission(origin, destination, mail.gameObject))
 			{
 				return;
 			}
 
 			var mission = GenerateMailMissionMethod.Invoke(
 				office,
-				new object[] { mailGood, bottleneck, distance, 0 }) as Mission;
+				new object[] { mailGood, destination, distance, 0 }) as Mission;
 			if (mission == null)
 			{
 				return;
 			}
 
 			mission.totalPrice = CurrencyMarket.instance.GetSellPriceInCurrency(
-				(Currency)bottleneck.region,
+				(Currency)destination.region,
 				mission.totalPrice,
 				false);
 			mission.pricePerKm = mission.totalPrice / mission.distance;
@@ -231,6 +256,36 @@ namespace PostalExpansion
 
 			Port port = Port.ports[SailwindPortIndex.BetterPortsBottleneck];
 			return port != null && port.name == BottleneckObjectName ? port : null;
+		}
+
+		private static Port GetTamarack()
+		{
+			if (!TamarackLoaded || Port.ports == null)
+			{
+				return null;
+			}
+
+			if (!IsTamarack(tamarackIndex))
+			{
+				tamarackIndex = -1;
+				for (int i = 0; i < Port.ports.Length && tamarackIndex < 0; i++)
+				{
+					if (IsTamarack(i))
+					{
+						tamarackIndex = i;
+					}
+				}
+			}
+
+			return tamarackIndex >= 0 ? Port.ports[tamarackIndex] : null;
+		}
+
+		private static bool IsTamarack(int index)
+		{
+			return index >= 0 &&
+				index < Port.ports.Length &&
+				Port.ports[index] != null &&
+				Port.ports[index].GetPortName() == TamarackPortName;
 		}
 
 		private static bool Contains(Port[] ports, Port port)
@@ -266,33 +321,6 @@ namespace PostalExpansion
 
 		private static readonly Vector3 ExpressMailSealLocalPosition =
 			new Vector3(0.303f, 0.215f, 0.171f);
-
-		private static readonly HashSet<int> ExpressMailAvailablePortIndices =
-			new HashSet<int>
-			{
-				SailwindPortIndex.FortAestrin,
-				SailwindPortIndex.SirenSong,
-				SailwindPortIndex.Eastwind,
-				SailwindPortIndex.Sunspire,
-				SailwindPortIndex.HappyBay,
-				SailwindPortIndex.NewPort,
-				SailwindPortIndex.DragonCliffs,
-				SailwindPortIndex.CrabBeach,
-				SailwindPortIndex.SageHills,
-				SailwindPortIndex.FireFishTown,
-				SailwindPortIndex.KiciaBay,
-				SailwindPortIndex.GoldRockCity,
-				SailwindPortIndex.Neverdin,
-				SailwindPortIndex.AlNilem,
-				SailwindPortIndex.OldAnkhTown,
-				SailwindPortIndex.Oasis,
-				SailwindPortIndex.Senna,
-				SailwindPortIndex.FireflyGrotto,
-				SailwindPortIndex.Sanctuary,
-				SailwindPortIndex.AlAnkhAcademy,
-				SailwindPortIndex.Chronos,
-				SailwindPortIndex.BetterPortsBottleneck
-			};
 
 		private static readonly HashSet<int> HardPortIndices = new HashSet<int>
 		{
@@ -357,7 +385,8 @@ namespace PostalExpansion
 				missions == null ||
 				!EnsureTemplate() ||
 				Port.ports == null ||
-				!ExpressMailAvailablePortIndices.Contains(origin.portIndex))
+				origin.portIndex == SailwindPortIndex.SaffronIsland ||
+				origin.portIndex == SailwindPortIndex.TestPort)
 			{
 				return;
 			}
