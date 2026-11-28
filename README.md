@@ -2,6 +2,8 @@
 *Disclaimer: This mod is made with ChatGPT 5.6 Sol*
 
 This is aim to make mail deliver excel in reputation grind. Or adjust gold reward and become full mailman
+
+Support mod: Better port's bottleneck island and Tamarack island
 ## Regular mail ##
 - All Mail now goes into a seperated Mission book tab
 - Regular Mail gold reward default to 0.5x compare to vanilla, but reputation is now 1.25x.
@@ -32,28 +34,6 @@ This is aim to make mail deliver excel in reputation grind. Or adjust gold rewar
 - At rep 3 you will receive 1 local and 1 world express mail mission. Rep 4 you will receive 2 each. Rep 5 three each. Rep 6+ still 3 each but you will have 1 guaranteed hard port mission for both local and world mission (so total 2).
 - Express Mail ignore all destination limit, means anywhere could be the destination, except Safforn.
 - Express mail mission always spawn with 1 package only
-- You can only get Express Mail mission at following port:
-1. Fort Aestrin
-2. Siren Song
-3. Eastwind
-4. Sunspire
-5. Happy Bay
-6. New Port
-7. Dragon Cliffs
-8. Crab Beach
-9. Sage Hills
-10. Fire Fish Town
-11. Kicia Bay
-12. Gold Rock City
-13. Neverdin
-14. Al'Nilem
-15. Old Ankh Town
-16. Oasis
-17. Sen'na
-18. Firefly Grotto
-19. Sanctuary
-20. Al'Ankh Academy
-21. Chronos
 ### Urgent mail ###
 - Unlock after rep 6
 - one of the world express mail mission will become Urgent express mail
